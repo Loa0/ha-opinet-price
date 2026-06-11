@@ -115,16 +115,35 @@ class OpinetCheapestSensor(SensorEntity):
                     lat, lon = loc.attributes["lat"], loc.attributes["lon"]
         
         kx, ky = self._converter.wgs84_to_katec(lat, lon)
-        url = f"https://www.opinet.co.kr/api/aroundAll.do?code={self._api_key}&x={kx}&y={ky}&radius={self._radius}&prodcd={self._prodcd}&sort=1&out=json"
+        # 정수형으로 변환하여 API 호환성 높임
+        kx_int, ky_int = int(kx), int(ky)
+        
+        url = f"https://www.opinet.co.kr/api/aroundAll.do?code={self._api_key}&x={kx_int}&y={ky_int}&radius={self._radius}&prodcd={self._prodcd}&sort=1&out=json"
+        
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "application/json, text/javascript, */*; q=0.01",
+        }
         
         try:
-            async with async_timeout.timeout(10):
+            async with async_timeout.timeout(15):
                 session = async_get_clientsession(self.hass)
-                async with session.get(url) as response:
-                    res = await response.json()
+                async with session.get(url, headers=headers) as response:
+                    if response.status != 200:
+                        _LOGGER.error("Opinet API error: Status %s", response.status)
+                        return
+
+                    # JSON 응답 확인
+                    try:
+                        res = await response.json()
+                    except Exception:
+                        body = await response.text()
+                        _LOGGER.error("Opinet API returned non-JSON response (first 200 chars): %s", body[:200])
+                        return
+
                     stations = res.get("RESULT", {}).get("OIL", [])
                     if stations:
-                        # 이미 Opinet API에서 최저가 순(sort=1)으로 주지만 한 번 더 정렬 확인
+                        # 최저가 순 정렬
                         stations.sort(key=lambda x: int(x["PRICE"]))
                         cheapest = stations[0]
                         self._state = cheapest["PRICE"]
@@ -135,10 +154,14 @@ class OpinetCheapestSensor(SensorEntity):
                             "주소": cheapest.get("VAN_ADR", "주소 정보 없음"),
                             "브랜드": cheapest["POLL_DIV_CD"],
                             "거리": f"{float(cheapest['DISTANCE'])/1000:.1f} km",
-                            "주변 주유소": [f"{s['OS_NM']}: {s['PRICE']}원 ({float(s['DISTANCE'])/1000:.1f}km)" for s in stations[:5]]
+                            "주변 주유소": [f"{s['OS_NM']}: {s['PRICE']}원 ({float(s['DISTANCE'])/1000:.1f}km)" for s in stations[:10]]
                         }
                     else:
                         self._state = "검색 결과 없음"
-                        self._attr = {"주변 주유소": []}
+                        self._attr = {
+                            "station_name": "검색 결과 없음",
+                            "address": "해당 반경 내에 주유소가 없습니다.",
+                            "nearby_stations": []
+                        }
         except Exception as e:
             _LOGGER.error("Error updating Opinet sensor: %s", e)
