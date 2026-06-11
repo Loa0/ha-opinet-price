@@ -1,6 +1,7 @@
 import logging
 import math
 import async_timeout
+import json
 from datetime import timedelta
 
 from homeassistant.components.sensor import SensorEntity
@@ -115,14 +116,12 @@ class OpinetCheapestSensor(SensorEntity):
                     lat, lon = loc.attributes["lat"], loc.attributes["lon"]
         
         kx, ky = self._converter.wgs84_to_katec(lat, lon)
-        # 정수형으로 변환하여 API 호환성 높임
         kx_int, ky_int = int(kx), int(ky)
         
         url = f"https://www.opinet.co.kr/api/aroundAll.do?code={self._api_key}&x={kx_int}&y={ky_int}&radius={self._radius}&prodcd={self._prodcd}&sort=1&out=json"
         
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Accept": "application/json, text/javascript, */*; q=0.01",
         }
         
         try:
@@ -133,17 +132,18 @@ class OpinetCheapestSensor(SensorEntity):
                         _LOGGER.error("Opinet API error: Status %s", response.status)
                         return
 
-                    # JSON 응답 확인
+                    body = await response.text()
+                    # 오피넷 API는 가끔 JSON 앞에 공백이나 줄바꿈을 넣어서 파싱 에러를 유발함
+                    body = body.strip()
+                    
                     try:
-                        res = await response.json()
-                    except Exception:
-                        body = await response.text()
-                        _LOGGER.error("Opinet API returned non-JSON response (first 200 chars): %s", body[:200])
+                        res = json.loads(body)
+                    except Exception as je:
+                        _LOGGER.error("Opinet JSON parse error: %s (Body starts with: %s)", je, body[:100])
                         return
 
                     stations = res.get("RESULT", {}).get("OIL", [])
                     if stations:
-                        # 최저가 순 정렬
                         stations.sort(key=lambda x: int(x["PRICE"]))
                         cheapest = stations[0]
                         self._state = cheapest["PRICE"]
