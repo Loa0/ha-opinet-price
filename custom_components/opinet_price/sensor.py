@@ -6,11 +6,11 @@ from datetime import timedelta
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, CoordinatorEntity, UpdateFailed
 
 from .const import DOMAIN, CONF_API_KEY, CONF_RADIUS, CONF_PRODCD, CONF_LOCATION_ENTITY
 
 _LOGGER = logging.getLogger(__name__)
-SCAN_INTERVAL = timedelta(hours=3)
 
 async def async_setup_entry(hass, entry, async_add_entities):
     api_key = entry.data.get(CONF_API_KEY)
@@ -18,7 +18,15 @@ async def async_setup_entry(hass, entry, async_add_entities):
     prodcd = entry.data.get(CONF_PRODCD, "B027")
     location_entity = entry.data.get(CONF_LOCATION_ENTITY)
 
-    async_add_entities([OpinetCheapestSensor(api_key, radius, prodcd, location_entity)], True)
+    coordinator = OpinetDataUpdateCoordinator(hass, api_key, radius, prodcd, location_entity)
+    await coordinator.async_config_entry_first_refresh()
+
+    # 상위 10개 주유소에 대한 센서 생성
+    sensors = []
+    for i in range(10):
+        sensors.append(OpinetStationSensor(coordinator, i, location_entity))
+    
+    async_add_entities(sensors)
 
 class KatecConverter:
     def __init__(self):
@@ -64,49 +72,24 @@ class KatecConverter:
     def _meridian(self, lat):
         return self.bessel_a * ((1 - 0.00667437223131/4 - 3*(0.00667437223131**2)/64) * lat - (3*0.00667437223131/8 + 3*(0.00667437223131**2)/32) * math.sin(2*lat) + (15*(0.00667437223131**2)/256) * math.sin(4*lat))
 
-class OpinetCheapestSensor(SensorEntity):
-    def __init__(self, api_key, radius, prodcd, location_entity):
-        self._api_key = api_key
-        self._radius = radius
-        self._prodcd = prodcd
-        self._location_entity = location_entity
-        self._state = None
-        self._attr = {
-            "station_name": "검색 중...",
-            "address": "검색 중...",
-            "nearby_stations": []
-        }
-        self._converter = KatecConverter()
-        self._name = "오피넷 최저가 주유소"
+class OpinetDataUpdateCoordinator(DataUpdateCoordinator):
+    def __init__(self, hass, api_key, radius, prodcd, location_entity):
+        super().__init__(
+            hass,
+            _LOGGER,
+            name=DOMAIN,
+            update_interval=timedelta(hours=3),
+        )
+        self.api_key = api_key
+        self.radius = radius
+        self.prodcd = prodcd
+        self.location_entity = location_entity
+        self.converter = KatecConverter()
 
-    @property
-    def name(self):
-        return self._name
-
-    @property
-    def unique_id(self):
-        return f"opinet_cheapest_{self._location_entity or 'home'}"
-
-    @property
-    def state(self):
-        return self._state
-
-    @property
-    def extra_state_attributes(self):
-        return self._attr
-
-    @property
-    def unit_of_measurement(self):
-        return "원"
-
-    @property
-    def icon(self):
-        return "mdi:gas-station"
-
-    async def async_update(self):
+    async def _async_update_data(self):
         lat, lon = self.hass.config.latitude, self.hass.config.longitude
-        if self._location_entity:
-            loc = self.hass.states.get(self._location_entity)
+        if self.location_entity:
+            loc = self.hass.states.get(self.location_entity)
             if loc:
                 if "Location" in loc.attributes and isinstance(loc.attributes["Location"], list):
                     lat, lon = loc.attributes["Location"][0], loc.attributes["Location"][1]
@@ -115,53 +98,64 @@ class OpinetCheapestSensor(SensorEntity):
                 elif "lat" in loc.attributes:
                     lat, lon = loc.attributes["lat"], loc.attributes["lon"]
         
-        kx, ky = self._converter.wgs84_to_katec(lat, lon)
+        kx, ky = self.converter.wgs84_to_katec(lat, lon)
         kx_int, ky_int = int(kx), int(ky)
         
-        url = f"https://www.opinet.co.kr/api/aroundAll.do?code={self._api_key}&x={kx_int}&y={ky_int}&radius={self._radius}&prodcd={self._prodcd}&sort=1&out=json"
-        
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        }
-        
+        url = f"https://www.opinet.co.kr/api/aroundAll.do?code={self.api_key}&x={kx_int}&y={ky_int}&radius={self.radius}&prodcd={self.prodcd}&sort=1&out=json"
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
+
         try:
             async with async_timeout.timeout(15):
                 session = async_get_clientsession(self.hass)
                 async with session.get(url, headers=headers) as response:
                     if response.status != 200:
-                        _LOGGER.error("Opinet API error: Status %s", response.status)
-                        return
-
-                    body = await response.text()
-                    # 오피넷 API는 가끔 JSON 앞에 공백이나 줄바꿈을 넣어서 파싱 에러를 유발함
-                    body = body.strip()
+                        raise UpdateFailed(f"API Error: {response.status}")
                     
-                    try:
-                        res = json.loads(body)
-                    except Exception as je:
-                        _LOGGER.error("Opinet JSON parse error: %s (Body starts with: %s)", je, body[:100])
-                        return
-
+                    body = (await response.text()).strip()
+                    res = json.loads(body)
                     stations = res.get("RESULT", {}).get("OIL", [])
                     if stations:
                         stations.sort(key=lambda x: int(x["PRICE"]))
-                        cheapest = stations[0]
-                        self._state = cheapest["PRICE"]
-                        self._name = f"최저가: {cheapest['OS_NM']}"
-                        self._attr = {
-                            "주유소명": cheapest["OS_NM"],
-                            "가격": cheapest["PRICE"],
-                            "주소": cheapest.get("VAN_ADR", "주소 정보 없음"),
-                            "브랜드": cheapest["POLL_DIV_CD"],
-                            "거리": f"{float(cheapest['DISTANCE'])/1000:.1f} km",
-                            "주변 주유소": [f"{s['OS_NM']}: {s['PRICE']}원 ({float(s['DISTANCE'])/1000:.1f}km)" for s in stations[:10]]
-                        }
-                    else:
-                        self._state = "검색 결과 없음"
-                        self._attr = {
-                            "station_name": "검색 결과 없음",
-                            "address": "해당 반경 내에 주유소가 없습니다.",
-                            "nearby_stations": []
-                        }
+                        return stations
+                    return []
         except Exception as e:
-            _LOGGER.error("Error updating Opinet sensor: %s", e)
+            raise UpdateFailed(f"Error communicating with API: {e}")
+
+class OpinetStationSensor(CoordinatorEntity, SensorEntity):
+    def __init__(self, coordinator, index, location_entity):
+        super().__init__(coordinator)
+        self._index = index
+        self._location_entity = location_entity
+        self._attr_unique_id = f"opinet_price_{self._location_entity or 'home'}_{index + 1}"
+        self._attr_unit_of_measurement = "원"
+        self._attr_icon = "mdi:gas-station"
+
+    @property
+    def name(self):
+        stations = self.coordinator.data
+        if stations and len(stations) > self._index:
+            s = stations[self._index]
+            return f"주유소 {self._index + 1}: {s['OS_NM']}"
+        return f"주유소 {self._index + 1}: 검색 결과 없음"
+
+    @property
+    def state(self):
+        stations = self.coordinator.data
+        if stations and len(stations) > self._index:
+            return stations[self._index]["PRICE"]
+        return "검색 결과 없음"
+
+    @property
+    def extra_state_attributes(self):
+        stations = self.coordinator.data
+        if stations and len(stations) > self._index:
+            s = stations[self._index]
+            return {
+                "주유소명": s["OS_NM"],
+                "가격": s["PRICE"],
+                "주소": s.get("VAN_ADR", "주소 정보 없음"),
+                "브랜드": s["POLL_DIV_CD"],
+                "거리": f"{float(s['DISTANCE'])/1000:.1f} km",
+                "순위": self._index + 1
+            }
+        return {}
