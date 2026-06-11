@@ -13,7 +13,7 @@ SCAN_INTERVAL = timedelta(hours=3)
 
 async def async_setup_entry(hass, entry, async_add_entities):
     api_key = entry.data.get(CONF_API_KEY)
-    radius = entry.data.get(CONF_RADIUS, 3000)
+    radius = entry.data.get(CONF_RADIUS, 5000)
     prodcd = entry.data.get(CONF_PRODCD, "B027")
     location_entity = entry.data.get(CONF_LOCATION_ENTITY)
 
@@ -70,21 +70,37 @@ class OpinetCheapestSensor(SensorEntity):
         self._prodcd = prodcd
         self._location_entity = location_entity
         self._state = None
-        self._attr = {}
+        self._attr = {
+            "station_name": "검색 중...",
+            "address": "검색 중...",
+            "nearby_stations": []
+        }
         self._converter = KatecConverter()
+        self._name = "오피넷 최저가 주유소"
 
     @property
-    def name(self): return "오피넷 최저가 주유소"
+    def name(self):
+        return self._name
+
     @property
-    def unique_id(self): return f"opinet_cheapest_{self._location_entity or 'home'}"
+    def unique_id(self):
+        return f"opinet_cheapest_{self._location_entity or 'home'}"
+
     @property
-    def state(self): return self._state
+    def state(self):
+        return self._state
+
     @property
-    def extra_state_attributes(self): return self._attr
+    def extra_state_attributes(self):
+        return self._attr
+
     @property
-    def unit_of_measurement(self): return "원"
+    def unit_of_measurement(self):
+        return "원"
+
     @property
-    def icon(self): return "mdi:gas-station"
+    def icon(self):
+        return "mdi:gas-station"
 
     async def async_update(self):
         lat, lon = self.hass.config.latitude, self.hass.config.longitude
@@ -95,6 +111,8 @@ class OpinetCheapestSensor(SensorEntity):
                     lat, lon = loc.attributes["Location"][0], loc.attributes["Location"][1]
                 elif "latitude" in loc.attributes:
                     lat, lon = loc.attributes["latitude"], loc.attributes["longitude"]
+                elif "lat" in loc.attributes:
+                    lat, lon = loc.attributes["lat"], loc.attributes["lon"]
         
         kx, ky = self._converter.wgs84_to_katec(lat, lon)
         url = f"https://www.opinet.co.kr/api/aroundAll.do?code={self._api_key}&x={kx}&y={ky}&radius={self._radius}&prodcd={self._prodcd}&sort=1&out=json"
@@ -106,17 +124,21 @@ class OpinetCheapestSensor(SensorEntity):
                     res = await response.json()
                     stations = res.get("RESULT", {}).get("OIL", [])
                     if stations:
+                        # 이미 Opinet API에서 최저가 순(sort=1)으로 주지만 한 번 더 정렬 확인
                         stations.sort(key=lambda x: int(x["PRICE"]))
                         cheapest = stations[0]
                         self._state = cheapest["PRICE"]
+                        self._name = f"최저가: {cheapest['OS_NM']}"
                         self._attr = {
-                            "station_name": cheapest["OS_NM"],
-                            "brand": cheapest["POLL_DIV_CD"],
-                            "distance": cheapest["DISTANCE"],
-                            "address": cheapest.get("VAN_ADR", "N/A"),
-                            "nearby_stations": stations
+                            "주유소명": cheapest["OS_NM"],
+                            "가격": cheapest["PRICE"],
+                            "주소": cheapest.get("VAN_ADR", "주소 정보 없음"),
+                            "브랜드": cheapest["POLL_DIV_CD"],
+                            "거리": f"{float(cheapest['DISTANCE'])/1000:.1f} km",
+                            "주변 주유소": [f"{s['OS_NM']}: {s['PRICE']}원 ({float(s['DISTANCE'])/1000:.1f}km)" for s in stations[:5]]
                         }
                     else:
                         self._state = "검색 결과 없음"
+                        self._attr = {"주변 주유소": []}
         except Exception as e:
             _LOGGER.error("Error updating Opinet sensor: %s", e)

@@ -18,10 +18,10 @@ class OpinetPriceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="user",
             data_schema=vol.Schema({
                 vol.Required(CONF_API_KEY): str,
-                vol.Optional(CONF_RADIUS, default=3000): int,
+                vol.Optional(CONF_RADIUS, default=5000): int,
                 vol.Optional(CONF_PRODCD, default="B027"): vol.In(PROD_CODES),
                 vol.Optional(CONF_LOCATION_ENTITY): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain=["device_tracker"])
+                    selector.EntitySelectorConfig(domain=["device_tracker", "person"])
                 ),
             }),
             errors=errors,

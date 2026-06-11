@@ -1,1 +1,27 @@
-# HA Opinet Price\n오피넷 API를 활용한 홈어시스턴트 주변 최저가 주유소 찾기 커스텀 컴포넌트입니다.\n\n## HACS 설치 방법\n1. HACS -> Integrations -> 우측 상단 점 3개 -> Custom repositories\n2. Repository: `Loa0/ha-opinet-price`, Category: `Integration` 추가\n3. "Opinet Price" 검색 후 설치
+# 오피넷 주유소 최저가 (HA Opinet Price)
+
+오피넷 API를 활용하여 사용자의 현재 위치 또는 특정 위치 기기(device_tracker, person)를 기준으로 주변의 최저가 주유소를 찾아주는 Home Assistant 커스텀 컴포넌트입니다.
+
+## 주요 기능
+- **반경 5km 검색**: 설정된 위치 기준 반경 5km 내의 모든 주유소를 검색합니다.
+- **최저가 정렬**: 검색된 주유소 중 가장 저렴한 곳을 찾아 센서의 상태값으로 표시합니다.
+- **상세 정보 표시**: 주유소 이름, 가격, 주소, 브랜드, 거리 등을 속성(Attribute)으로 제공합니다.
+- **동적 이름 변경**: 현재 가장 저렴한 주유소의 이름이 센서의 이름으로 표시됩니다.
+- **주변 주유소 목록**: 상위 5개의 저렴한 주유소 리스트를 속성에서 확인할 수 있습니다.
+
+## 설치 방법 (HACS)
+1. **HACS** -> **통합구성요소(Integrations)** -> 우측 상단 **점 3개** -> **커스텀 저장소(Custom repositories)** 클릭
+2. Repository: `Loa0/ha-opinet-price`, Category: `Integration` 입력 후 추가
+3. "오피넷 주유소 최저가" 검색 후 설치
+4. Home Assistant 재시작
+
+## 설정 방법 (UI)
+1. **설정** -> **기기 및 서비스** -> **통합구성요소 추가**
+2. **"오피넷 주유소 최저가"** 검색 및 선택
+3. **API Key**: 오피넷에서 발급받은 API 키 입력
+4. **위치 엔티티**: 위치를 추적할 `device_tracker` 또는 `person` 엔티티 선택 (미선택 시 HA 기본 위치 기준)
+5. **검색 반경**: 기본 5000m (5km) 설정
+
+## 참고 사항
+- **API 키**: [오피넷 API 서비스](https://www.opinet.co.kr/user/main/mainView.do)에서 무료로 발급받을 수 있습니다.
+- **업데이트**: HACS를 통해 최신 버전을 유지해 주세요.
