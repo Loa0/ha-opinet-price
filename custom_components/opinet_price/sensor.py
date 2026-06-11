@@ -137,15 +137,15 @@ class OpinetStationSensor(CoordinatorEntity, SensorEntity):
         stations = self.coordinator.data
         if stations and len(stations) > self._index:
             s = stations[self._index]
-            return f"주유소 {self._index + 1}: {s['OS_NM']}"
-        return f"주유소 {self._index + 1}: 검색 결과 없음"
+            return f"{self._index + 1}위: {s['OS_NM']}"
+        return f"{self._index + 1}위: 검색 결과 없음"
 
     @property
     def state(self):
         stations = self.coordinator.data
         if stations and len(stations) > self._index:
             s = stations[self._index]
-            return f"{s['OS_NM']}: {s['PRICE']}원"
+            return f"{self._index + 1}위 {s['OS_NM']}: {s['PRICE']}원"
         return "검색 결과 없음"
 
     @property
