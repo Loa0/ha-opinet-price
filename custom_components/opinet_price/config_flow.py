@@ -21,7 +21,7 @@ class OpinetPriceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(CONF_RADIUS, default=3000): int,
                 vol.Optional(CONF_PRODCD, default="B027"): vol.In(PROD_CODES),
                 vol.Optional(CONF_LOCATION_ENTITY): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain=["device_tracker", "sensor"])
+                    selector.EntitySelectorConfig(domain=["device_tracker"])
                 ),
             }),
             errors=errors,
