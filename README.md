@@ -1,0 +1,1 @@
+# HA Opinet Price\n오피넷 API를 활용한 홈어시스턴트 주변 최저가 주유소 찾기 커스텀 컴포넌트입니다.\n\n## HACS 설치 방법\n1. HACS -> Integrations -> 우측 상단 점 3개 -> Custom repositories\n2. Repository: `Loa0/ha-opinet-price`, Category: `Integration` 추가\n3. "Opinet Price" 검색 후 설치
