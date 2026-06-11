@@ -134,18 +134,14 @@ class OpinetStationSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def name(self):
-        stations = self.coordinator.data
-        if stations and len(stations) > self._index:
-            s = stations[self._index]
-            return f"{self._index + 1}위: {s['OS_NM']}"
-        return f"{self._index + 1}위: 검색 결과 없음"
+        return f"{self._index + 1}위"
 
     @property
     def state(self):
         stations = self.coordinator.data
         if stations and len(stations) > self._index:
             s = stations[self._index]
-            return f"{self._index + 1}위 {s['OS_NM']}: {s['PRICE']}원"
+            return f"{s['OS_NM']}: {int(s['PRICE']):,}원"
         return "검색 결과 없음"
 
     @property
@@ -159,7 +155,7 @@ class OpinetStationSensor(CoordinatorEntity, SensorEntity):
             short_addr = parts[1] if len(parts) > 1 and len(parts[1]) > 0 else full_addr
             return {
                 "주유소명": s["OS_NM"],
-                "가격": s["PRICE"],
+                "가격": int(s["PRICE"]),
                 "주소": full_addr,
                 "간략주소": short_addr,
                 "브랜드": s["POLL_DIV_CD"],
@@ -195,7 +191,7 @@ class OpinetCombinedSensor(CoordinatorEntity, SensorEntity):
         stations = self.coordinator.data
         if stations and len(stations) > 0:
             cheapest = stations[0]  # 가격순 정렬되어 있으므로 첫 번째가 최저가
-            return f"최저가: {cheapest['OS_NM']} {cheapest['PRICE']}원"
+            return f"최저가: {cheapest['OS_NM']} {int(cheapest['PRICE']):,}원"
         return "주유소 정보 없음"
 
     @property
