@@ -39,11 +39,10 @@ async def async_setup_entry(hass, entry, async_add_entities):
     )
     self_only = entry.options.get(CONF_SELF_ONLY, entry.data.get(CONF_SELF_ONLY, False))
     highway_filter = entry.options.get(CONF_HIGHWAY_FILTER, entry.data.get(CONF_HIGHWAY_FILTER, "전체"))
-    max_distance_km = entry.options.get(CONF_MAX_DISTANCE, entry.data.get(CONF_MAX_DISTANCE))
-    if max_distance_km is None:
-        max_distance_km = radius / 1000.0
-    else:
-        max_distance_km = float(max_distance_km)
+    show_distance = entry.options.get(CONF_MAX_DISTANCE, entry.data.get(CONF_MAX_DISTANCE, True))
+    if isinstance(show_distance, str):
+        show_distance = show_distance.lower() not in ("false", "0", "no")
+    show_distance = bool(show_distance)
     
     _LOGGER.debug(
         "Setting up Opinet Price entry. options: %s, data: %s, poll_div: %s, self_only: %s, highway_filter: %s",
@@ -64,14 +63,13 @@ async def async_setup_entry(hass, entry, async_add_entities):
         poll_div,
         self_only,
         highway_filter,
-        max_distance_km,
     )
     await coordinator.async_config_entry_first_refresh()
 
     # 상위 10개 주유소에 대한 개별 센서 생성
     sensors = []
     for i in range(10):
-        sensors.append(OpinetStationSensor(coordinator, entry, i, location_entity))
+        sensors.append(OpinetStationSensor(coordinator, entry, i, location_entity, show_distance))
     
     async_add_entities(sensors)
 
@@ -120,7 +118,7 @@ class KatecConverter:
         return self.bessel_a * ((1 - 0.00667437223131/4 - 3*(0.00667437223131**2)/64) * lat - (3*0.00667437223131/8 + 3*(0.00667437223131**2)/32) * math.sin(2*lat) + (15*(0.00667437223131**2)/256) * math.sin(4*lat))
 
 class OpinetDataUpdateCoordinator(DataUpdateCoordinator):
-    def __init__(self, hass, entry, api_key, radius, prodcd, location_entity, poll_div=None, self_only=False, highway_filter="전체", max_distance_km=None):
+    def __init__(self, hass, entry, api_key, radius, prodcd, location_entity, poll_div=None, self_only=False, highway_filter="전체"):
         super().__init__(
             hass,
             _LOGGER,
@@ -135,7 +133,6 @@ class OpinetDataUpdateCoordinator(DataUpdateCoordinator):
         self.poll_div = poll_div
         self.self_only = self_only
         self.highway_filter = highway_filter
-        self.max_distance_km = max_distance_km
         self.converter = KatecConverter()
 
     async def _async_update_data(self):
@@ -224,19 +221,6 @@ class OpinetDataUpdateCoordinator(DataUpdateCoordinator):
                             len(stations),
                         )
                     
-                    # 4. 거리 필터링 적용
-                    if self.max_distance_km is not None and stations:
-                        max_dist_m = float(self.max_distance_km) * 1000
-                        stations = [
-                            s for s in stations
-                            if float(s.get("DISTANCE", 0)) <= max_dist_m
-                        ]
-                        _LOGGER.debug(
-                            "Filtered stations by max distance %.1fkm: %d stations remaining",
-                            self.max_distance_km,
-                            len(stations),
-                        )
-
                     if stations:
                         stations.sort(key=lambda x: int(x["PRICE"]))
                     
@@ -246,10 +230,11 @@ class OpinetDataUpdateCoordinator(DataUpdateCoordinator):
             raise UpdateFailed(f"Error communicating with API: {e}")
 
 class OpinetStationSensor(CoordinatorEntity, SensorEntity):
-    def __init__(self, coordinator, entry, index, location_entity):
+    def __init__(self, coordinator, entry, index, location_entity, show_distance=True):
         super().__init__(coordinator)
         self._index = index
         self._location_entity = location_entity
+        self._show_distance = show_distance
         self._attr_unique_id = f"opinet_price_{self._location_entity or 'home'}_{index + 1}"
         self._attr_icon = "mdi:gas-station"
         self._attr_device_info = DeviceInfo(
@@ -268,7 +253,10 @@ class OpinetStationSensor(CoordinatorEntity, SensorEntity):
         stations = self.coordinator.data
         if stations and len(stations) > self._index:
             s = stations[self._index]
-            return f"{s['OS_NM']}: {int(s['PRICE']):,}원 ({float(s['DISTANCE'])/1000:.1f}km)"
+            base = f"{s['OS_NM']}: {int(s['PRICE']):,}원"
+            if self._show_distance:
+                base += f" ({float(s['DISTANCE'])/1000:.1f}km)"
+            return base
         return "검색 결과 없음"
 
     @property

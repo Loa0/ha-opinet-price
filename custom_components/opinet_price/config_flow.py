@@ -80,15 +80,7 @@ class OpinetPriceOptionsFlowHandler(config_entries.OptionsFlow):
             )
         )
 
-        distance_selector = selector.NumberSelector(
-            selector.NumberSelectorConfig(
-                min=0.5,
-                max=20.0,
-                step=0.1,
-                unit_of_measurement="km",
-                mode=selector.NumberSelectorMode.SLIDER,
-            )
-        )
+        show_distance_selector = selector.BooleanSelector()
 
         current_value = self.config_entry.options.get(
             CONF_POLL_DIV,
@@ -117,12 +109,9 @@ class OpinetPriceOptionsFlowHandler(config_entries.OptionsFlow):
             self.config_entry.data.get(CONF_HIGHWAY_FILTER, "전체")
         )
 
-        default_max_distance = self.config_entry.options.get(
+        default_show_distance = self.config_entry.options.get(
             CONF_MAX_DISTANCE,
-            self.config_entry.data.get(CONF_MAX_DISTANCE, self.config_entry.options.get(
-                CONF_RADIUS,
-                self.config_entry.data.get(CONF_RADIUS, 5000)
-            ) / 1000.0)
+            self.config_entry.data.get(CONF_MAX_DISTANCE, True)
         )
 
         return self.async_show_form(
@@ -149,8 +138,8 @@ class OpinetPriceOptionsFlowHandler(config_entries.OptionsFlow):
                 ): highway_selector,
                 vol.Optional(
                     CONF_MAX_DISTANCE,
-                    default=default_max_distance
-                ): distance_selector,
+                    default=default_show_distance
+                ): show_distance_selector,
             })
         )
 
