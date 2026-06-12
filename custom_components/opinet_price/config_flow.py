@@ -14,38 +14,18 @@ class OpinetPriceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             return self.async_create_entry(title="오피넷 주유소", data=user_input)
 
-        brand_options = [{"value": code, "label": name} for code, name in BRAND_CODES.items()]
-        brand_selector = selector.SelectSelector(
-            selector.SelectSelectorConfig(
-                options=brand_options,
-                multiple=True,
-                mode=selector.SelectSelectorMode.DROPDOWN,
-            )
-        )
-
-        radius_selector = selector.NumberSelector(
-            selector.NumberSelectorConfig(
-                min=500,
-                max=20000,
-                step=100,
-                unit_of_measurement="m",
-                mode=selector.NumberSelectorMode.SLIDER,
-            )
-        )
-
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema({
                 vol.Required(CONF_API_KEY): str,
-                vol.Optional(CONF_RADIUS, default=5000): radius_selector,
                 vol.Optional(CONF_PRODCD, default="B027"): vol.In(PROD_CODES),
                 vol.Optional(CONF_LOCATION_ENTITY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain=["device_tracker", "person"])
                 ),
-                vol.Optional(CONF_POLL_DIV): brand_selector,
             }),
             errors=errors,
         )
+
 
     @staticmethod
     @callback
