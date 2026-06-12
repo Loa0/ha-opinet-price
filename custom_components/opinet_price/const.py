@@ -7,8 +7,11 @@ CONF_POLL_DIV = "주유소 필터"
 CONF_SELF_ONLY = "셀프주유소만"
 CONF_HIGHWAY_FILTER = "고속도로"
 CONF_MAX_DISTANCE = "거리 표시"
+CONF_TMAP_KEY = "tmap_api_key"
+CONF_SORT_ORDER = "정렬 순서"
 
 HIGHWAY_OPTIONS = ["전체", "고속도로만", "고속도로 제외"]
+SORT_OPTIONS = ["가격순", "주행거리순"]
 
 PROD_CODES = {
     "B027": "휘발유",

@@ -1,5 +1,6 @@
 import logging
 import math
+import asyncio
 import async_timeout
 import json
 from datetime import timedelta
@@ -19,10 +20,14 @@ from .const import (
     CONF_SELF_ONLY,
     CONF_HIGHWAY_FILTER,
     CONF_MAX_DISTANCE,
+    CONF_TMAP_KEY,
+    CONF_SORT_ORDER,
     PROD_CODES,
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+TMAP_ROUTE_URL = "https://apis.openapi.sk.com/tmap/routes?version=1"
 
 async def async_setup_entry(hass, entry, async_add_entities):
     api_key = entry.data.get(CONF_API_KEY)
@@ -51,14 +56,17 @@ async def async_setup_entry(hass, entry, async_add_entities):
     if isinstance(show_distance, str):
         show_distance = show_distance.lower() not in ("false", "0", "no")
     show_distance = bool(show_distance)
+    tmap_key = entry.options.get(CONF_TMAP_KEY, entry.data.get(CONF_TMAP_KEY, ""))
+    sort_order = entry.options.get(CONF_SORT_ORDER, entry.data.get(CONF_SORT_ORDER, "가격순"))
     
     _LOGGER.debug(
-        "Setting up Opinet Price entry. options: %s, data: %s, poll_div: %s, self_only: %s, highway_filter: %s",
+        "Setting up Opinet Price entry. options: %s, data: %s, poll_div: %s, self_only: %s, highway_filter: %s, sort: %s",
         entry.options,
         entry.data,
         poll_div,
         self_only,
         highway_filter,
+        sort_order,
     )
 
     coordinator = OpinetDataUpdateCoordinator(
@@ -71,6 +79,8 @@ async def async_setup_entry(hass, entry, async_add_entities):
         poll_div,
         self_only,
         highway_filter,
+        tmap_key,
+        sort_order,
     )
     await coordinator.async_config_entry_first_refresh()
 
@@ -125,8 +135,104 @@ class KatecConverter:
     def _meridian(self, lat):
         return self.bessel_a * ((1 - 0.00667437223131/4 - 3*(0.00667437223131**2)/64) * lat - (3*0.00667437223131/8 + 3*(0.00667437223131**2)/32) * math.sin(2*lat) + (15*(0.00667437223131**2)/256) * math.sin(4*lat))
 
+def katec_to_wgs84(gis_x, gis_y):
+    """Opinet GIS_X_COOR/GIS_Y_COOR (Bessel KATEC) → WGS84 (lat, lon)"""
+    try:
+        kx = float(gis_x); ky = float(gis_y)
+    except (TypeError, ValueError):
+        return None, None
+    
+    # Bessel 1841 parameters
+    a = 6377397.155
+    es = 0.00667437223131
+    lon0 = 128.0 * math.pi / 180
+    lat0 = 38.0 * math.pi / 180
+    k0 = 0.9999
+    x0 = 400000.0
+    y0 = 600000.0
+    dx, dy, dz = 115.80, -474.99, -674.11
+    
+    kx -= x0; ky -= y0
+    
+    # Meridian distance
+    def _m(lat):
+        return a * ((1-es/4-3*es**2/64-5*es**3/256)*lat
+               - (3*es/8+3*es**2/32+45*es**3/1024)*math.sin(2*lat)
+               + (15*es**2/256+45*es**3/1024)*math.sin(4*lat)
+               - (35*es**3/3072)*math.sin(6*lat))
+    
+    M0 = _m(lat0)
+    M = M0 + ky / k0
+    e1 = (1 - math.sqrt(1 - es)) / (1 + math.sqrt(1 - es))
+    mu = M / (a * (1 - es/4 - 3*es**2/64 - 5*es**3/256))
+    
+    phi1 = mu + (3*e1/2 - 27*e1**3/32)*math.sin(2*mu) \
+           + (21*e1**2/16 - 55*e1**4/32)*math.sin(4*mu) \
+           + (151*e1**3/96)*math.sin(6*mu)
+    
+    sin_p, cos_p, tan_p = math.sin(phi1), math.cos(phi1), math.tan(phi1)
+    N1 = a / math.sqrt(1 - es * sin_p**2)
+    T, C = tan_p**2, es / (1 - es) * cos_p**2
+    D = kx / (N1 * k0)
+    
+    blat = phi1 - (N1*tan_p/(a*(1-es)/(1-es*sin_p**2)**1.5)) * (
+        D**2/2 - (5+3*T+10*C-4*C**2-9*es/(1-es))*D**4/24
+        + (61+90*T+298*C+45*T**2-252*es/(1-es)-3*C**2)*D**6/720
+    )
+    blon = lon0 + (D - (1+2*T+C)*D**3/6
+          + (5-2*C+28*T-3*C**2+8*es/(1-es)+24*T**2)*D**5/120) / cos_p
+    
+    # Bessel → WGS84 Molodensky
+    sin_b, cos_b = math.sin(blat), math.cos(blat)
+    sin_l, cos_l = math.sin(blon), math.cos(blon)
+    v = a / math.sqrt(1 - es * sin_b**2)
+    bx = v * cos_b * cos_l
+    by = v * cos_b * sin_l
+    bz = v * (1 - es) * sin_b
+    wx = bx + dx; wy = by + dy; wz = bz + dz
+    
+    wa = 6378137.0; wes = 0.00669437999014
+    p = math.sqrt(wx**2 + wy**2)
+    wlat = math.atan2(wz, p * (1 - wes))
+    for _ in range(5):
+        vw = wa / math.sqrt(1 - wes * math.sin(wlat)**2)
+        wlat = math.atan2(wz + wes * vw * math.sin(wlat), p)
+    wlon = math.atan2(wy, wx)
+    
+    return math.degrees(wlat), math.degrees(wlon)
+
+async def _fetch_tmap_distance(session, tmap_key, start_lat, start_lon, end_lat, end_lon):
+    """Tmap API로 주행거리(m) 조회"""
+    headers = {
+        "appKey": tmap_key,
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+    body = json.dumps({
+        "startX": start_lon,
+        "startY": start_lat,
+        "endX": end_lon,
+        "endY": end_lat,
+        "reqCoordType": "WGS84GEO",
+        "resCoordType": "WGS84GEO",
+    })
+    try:
+        async with async_timeout.timeout(10):
+            async with session.post(TMAP_ROUTE_URL, headers=headers, data=body) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    features = data.get("features", [])
+                    if features:
+                        props = features[0].get("properties", {})
+                        return props.get("totalDistance", None)
+                else:
+                    _LOGGER.debug("Tmap API error: %s", resp.status)
+    except Exception as e:
+        _LOGGER.debug("Tmap API call failed: %s", e)
+    return None
+
 class OpinetDataUpdateCoordinator(DataUpdateCoordinator):
-    def __init__(self, hass, entry, api_key, radius, prodcd, location_entity, poll_div=None, self_only=False, highway_filter="전체"):
+    def __init__(self, hass, entry, api_key, radius, prodcd, location_entity, poll_div=None, self_only=False, highway_filter="전체", tmap_key="", sort_order="가격순"):
         super().__init__(
             hass,
             _LOGGER,
@@ -141,6 +247,8 @@ class OpinetDataUpdateCoordinator(DataUpdateCoordinator):
         self.poll_div = poll_div
         self.self_only = self_only
         self.highway_filter = highway_filter
+        self.tmap_key = tmap_key
+        self.sort_order = sort_order
         self.converter = KatecConverter()
 
     async def _async_update_data(self):
@@ -229,7 +337,33 @@ class OpinetDataUpdateCoordinator(DataUpdateCoordinator):
                             len(stations),
                         )
                     
-                    if stations:
+                    # 4. Tmap 주행거리 계산 + 정렬
+                    use_tmap = self.tmap_key and self.sort_order == "주행거리순"
+                    if use_tmap and stations:
+                        _LOGGER.debug("Fetching Tmap driving distances for %d stations", len(stations))
+                        tasks = []
+                        for s in stations:
+                            gis_x = s.get("GIS_X_COOR")
+                            gis_y = s.get("GIS_Y_COOR")
+                            end_lat, end_lon = katec_to_wgs84(gis_x, gis_y)
+                            if end_lat is not None and end_lon is not None:
+                                tasks.append(_fetch_tmap_distance(session, self.tmap_key, lat, lon, end_lat, end_lon))
+                            else:
+                                tasks.append(None)
+                        
+                        tmap_distances = await asyncio.gather(*tasks, return_exceptions=True)
+                        for i, s in enumerate(stations):
+                            dist = tmap_distances[i]
+                            if isinstance(dist, (int, float)):
+                                s["_TMAP_DISTANCE"] = dist  # meters
+                            elif isinstance(dist, Exception):
+                                _LOGGER.debug("Tmap error for %s: %s", s.get("OS_NM"), dist)
+                        
+                        # 주행거리순 정렬
+                        stations.sort(key=lambda x: float(x.get("_TMAP_DISTANCE", 1e9)))
+                        _LOGGER.debug("Sorted stations by Tmap driving distance")
+                    elif stations:
+                        # 기본: 가격순
                         stations.sort(key=lambda x: int(x["PRICE"]))
                     
                     return stations
@@ -263,7 +397,13 @@ class OpinetStationSensor(CoordinatorEntity, SensorEntity):
             s = stations[self._index]
             base = f"{s['OS_NM']}: {int(s['PRICE']):,}원"
             if self._show_distance:
-                base += f" ({float(s['DISTANCE'])/1000:.1f}km)"
+                # Tmap 주행거리 우선, 없으면 Opinet 직선거리
+                tmap_dist = s.get("_TMAP_DISTANCE")
+                if tmap_dist is not None:
+                    base += f" ({float(tmap_dist)/1000:.1f}km)"
+                else:
+                    dist = s.get("DISTANCE", 0)
+                    base += f" ({float(dist)/1000:.1f}km)"
             return base
         return "검색 결과 없음"
 
@@ -273,16 +413,18 @@ class OpinetStationSensor(CoordinatorEntity, SensorEntity):
         if stations and len(stations) > self._index:
             s = stations[self._index]
             full_addr = s.get("VAN_ADR", "주소 정보 없음")
-            # 간략 주소: 첫 번째 공백 기준 앞부분(시/도)을 제외한 나머지
             parts = full_addr.split(" ", 1)
             short_addr = parts[1] if len(parts) > 1 and len(parts[1]) > 0 else full_addr
+            # 거리: Tmap 주행거리 우선
+            tmap_dist = s.get("_TMAP_DISTANCE")
+            dist_str = f"{float(tmap_dist)/1000:.1f} km" if tmap_dist is not None else f"{float(s.get('DISTANCE', 0))/1000:.1f} km"
             return {
                 "주유소명": s["OS_NM"],
                 "가격": int(s["PRICE"]),
                 "주소": full_addr,
                 "간략주소": short_addr,
                 "브랜드": s["POLL_DIV_CD"],
-                "거리": f"{float(s['DISTANCE'])/1000:.1f} km",
+                "거리": dist_str,
                 "순위": self._index + 1
             }
         return {}

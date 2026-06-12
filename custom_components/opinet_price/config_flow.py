@@ -14,9 +14,12 @@ from .const import (
     CONF_SELF_ONLY,
     CONF_HIGHWAY_FILTER,
     CONF_MAX_DISTANCE,
+    CONF_TMAP_KEY,
+    CONF_SORT_ORDER,
     PROD_CODES,
     BRAND_CODES,
     HIGHWAY_OPTIONS,
+    SORT_OPTIONS,
 )
 
 class OpinetPriceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -25,12 +28,25 @@ class OpinetPriceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_user(self, user_input=None):
         errors = {}
         if user_input is not None:
-            return self.async_create_entry(title="오피넷 주유소", data=user_input)
+            # 주행거리순 선택 시 Tmap API 키 필수
+            if user_input.get(CONF_SORT_ORDER) == "주행거리순" and not user_input.get(CONF_TMAP_KEY, "").strip():
+                errors[CONF_TMAP_KEY] = "주행거리순 선택 시 Tmap API 키가 필요합니다"
+            if not errors:
+                return self.async_create_entry(title="오피넷 주유소", data=user_input)
+
+        sort_selector = selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                options=SORT_OPTIONS,
+                mode=selector.SelectSelectorMode.DROPDOWN,
+            )
+        )
 
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema({
                 vol.Required(CONF_API_KEY): str,
+                vol.Required(CONF_SORT_ORDER, default="가격순"): sort_selector,
+                vol.Optional(CONF_TMAP_KEY, default=""): str,
                 vol.Optional(CONF_PRODCD, default="B027"): vol.In(PROD_CODES),
                 vol.Optional(CONF_LOCATION_ENTITY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain=["device_tracker", "person"])
@@ -82,6 +98,13 @@ class OpinetPriceOptionsFlowHandler(config_entries.OptionsFlow):
 
         show_distance_selector = selector.BooleanSelector()
 
+        sort_selector = selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                options=SORT_OPTIONS,
+                mode=selector.SelectSelectorMode.DROPDOWN,
+            )
+        )
+
         current_value = self.config_entry.options.get(
             CONF_POLL_DIV,
             self.config_entry.data.get(
@@ -122,6 +145,11 @@ class OpinetPriceOptionsFlowHandler(config_entries.OptionsFlow):
             self.config_entry.data.get(CONF_MAX_DISTANCE, True)
         )
 
+        default_sort = self.config_entry.options.get(
+            CONF_SORT_ORDER,
+            self.config_entry.data.get(CONF_SORT_ORDER, "가격순")
+        )
+
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema({
@@ -145,6 +173,17 @@ class OpinetPriceOptionsFlowHandler(config_entries.OptionsFlow):
                     CONF_MAX_DISTANCE,
                     default=default_show_distance
                 ): show_distance_selector,
+                vol.Optional(
+                    CONF_SORT_ORDER,
+                    default=default_sort
+                ): sort_selector,
+                vol.Optional(
+                    CONF_TMAP_KEY,
+                    default=self.config_entry.options.get(
+                        CONF_TMAP_KEY,
+                        self.config_entry.data.get(CONF_TMAP_KEY, "")
+                    )
+                ): str,
             })
         )
 
