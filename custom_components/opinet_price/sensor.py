@@ -337,9 +337,8 @@ class OpinetDataUpdateCoordinator(DataUpdateCoordinator):
                             len(stations),
                         )
                     
-                    # 4. Tmap 주행거리 계산 + 정렬
-                    use_tmap = self.tmap_key and self.sort_order == "주행거리순"
-                    if use_tmap and stations:
+                    # 4. Tmap 주행거리 계산 (키 있으면 항상)
+                    if self.tmap_key and stations:
                         _LOGGER.debug("Fetching Tmap driving distances for %d stations", len(stations))
                         tasks = []
                         for s in stations:
@@ -358,12 +357,12 @@ class OpinetDataUpdateCoordinator(DataUpdateCoordinator):
                                 s["_TMAP_DISTANCE"] = dist  # meters
                             elif isinstance(dist, Exception):
                                 _LOGGER.debug("Tmap error for %s: %s", s.get("OS_NM"), dist)
-                        
-                        # 주행거리순 정렬
+                    
+                    # 정렬
+                    if self.sort_order == "주행거리순":
                         stations.sort(key=lambda x: float(x.get("_TMAP_DISTANCE", 1e9)))
                         _LOGGER.debug("Sorted stations by Tmap driving distance")
                     elif stations:
-                        # 기본: 가격순
                         stations.sort(key=lambda x: int(x["PRICE"]))
                     
                     return stations
