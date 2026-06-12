@@ -19,6 +19,13 @@ async def async_setup_entry(hass, entry, async_add_entities):
     prodcd = entry.data.get(CONF_PRODCD, "B027")
     location_entity = entry.data.get(CONF_LOCATION_ENTITY)
     poll_div = entry.options.get(CONF_POLL_DIV, entry.data.get(CONF_POLL_DIV))
+    
+    _LOGGER.debug(
+        "Setting up Opinet Price entry. options: %s, data: %s, poll_div: %s",
+        entry.options,
+        entry.data,
+        poll_div,
+    )
 
     coordinator = OpinetDataUpdateCoordinator(hass, entry, api_key, radius, prodcd, location_entity, poll_div)
     await coordinator.async_config_entry_first_refresh()
@@ -117,19 +124,37 @@ class OpinetDataUpdateCoordinator(DataUpdateCoordinator):
                     
                     body = (await response.text()).strip()
                     res = json.loads(body)
-                    stations = res.get("RESULT", {}).get("OIL", [])
+                    
+                    result_data = res.get("RESULT", {})
+                    stations = []
+                    if isinstance(result_data, dict):
+                        stations = result_data.get("OIL", [])
+                    else:
+                        _LOGGER.warning("Opinet API returned error or unexpected RESULT format: %s", res)
+                    
+                    _LOGGER.debug("Retrieved %d stations from Opinet API", len(stations))
+                    
+                    # 브랜드 필터링 적용
+                    if self.poll_div and stations:
+                        if isinstance(self.poll_div, list):
+                            allowed_brands = self.poll_div
+                        else:
+                            allowed_brands = [b.strip() for b in self.poll_div.split(",") if b.strip()]
+                        
+                        if allowed_brands:
+                            stations = [s for s in stations if s.get("POLL_DIV_CD") in allowed_brands]
+                            _LOGGER.debug(
+                                "Filtered stations by brand(s) %s: %d stations remaining",
+                                allowed_brands,
+                                len(stations),
+                            )
+                    else:
+                        _LOGGER.debug("Brand filtering not applied. poll_div: %s", self.poll_div)
+                    
                     if stations:
-                        # 브랜드 필터링 적용
-                        if self.poll_div:
-                            if isinstance(self.poll_div, list):
-                                allowed_brands = self.poll_div
-                            else:
-                                allowed_brands = [b.strip() for b in self.poll_div.split(",") if b.strip()]
-                            if allowed_brands:
-                                stations = [s for s in stations if s.get("POLL_DIV_CD") in allowed_brands]
                         stations.sort(key=lambda x: int(x["PRICE"]))
-                        return stations
-                    return []
+                    
+                    return stations
         except Exception as e:
             raise UpdateFailed(f"Error communicating with API: {e}")
 
