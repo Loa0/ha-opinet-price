@@ -28,6 +28,7 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 TMAP_ROUTE_URL = "https://apis.openapi.sk.com/tmap/routes?version=1"
+TMAP_GEO_URL = "https://apis.openapi.sk.com/tmap/geo/reversegeocoding?version=1"
 
 async def async_setup_entry(hass, entry, async_add_entities):
     api_key = entry.data.get(CONF_API_KEY)
@@ -231,6 +232,25 @@ async def _fetch_tmap_distance(session, tmap_key, start_lat, start_lon, end_lat,
         _LOGGER.debug("Tmap API call failed: %s", e)
     return None
 
+async def _fetch_tmap_address(session, tmap_key, lat, lon):
+    """Tmap 역지오코딩으로 주소 조회 → (전체주소, 간략주소)"""
+    url = f"{TMAP_GEO_URL}&lat={lat}&lon={lon}&coordType=WGS84GEO&addressType=A00"
+    headers = {"appKey": tmap_key, "Accept": "application/json"}
+    try:
+        async with async_timeout.timeout(5):
+            async with session.get(url, headers=headers) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    addr_info = data.get("addressInfo", {})
+                    full = addr_info.get("fullAddress", "")
+                    # 간략주소: 시/도 제외
+                    parts = full.split(" ", 1)
+                    short = parts[1] if len(parts) > 1 and parts[1] else full
+                    return full, short
+    except Exception as e:
+        _LOGGER.debug("Tmap geocoding failed: %s", e)
+    return "", ""
+
 class OpinetDataUpdateCoordinator(DataUpdateCoordinator):
     def __init__(self, hass, entry, api_key, radius, prodcd, location_entity, poll_div=None, self_only=False, highway_filter="전체", tmap_key="", sort_order="가격순"):
         super().__init__(
@@ -337,26 +357,40 @@ class OpinetDataUpdateCoordinator(DataUpdateCoordinator):
                             len(stations),
                         )
                     
-                    # 4. Tmap 주행거리 계산 (키 있으면 항상)
+                    # 4. Tmap 주행거리 + 주소 조회 (키 있으면 항상)
                     if self.tmap_key and stations:
                         _LOGGER.debug("Fetching Tmap driving distances for %d stations", len(stations))
-                        tasks = []
-                        for s in stations:
+                        dist_tasks = []
+                        addr_tasks = []
+                        addr_indices = []
+                        for i, s in enumerate(stations):
                             gis_x = s.get("GIS_X_COOR")
                             gis_y = s.get("GIS_Y_COOR")
                             end_lat, end_lon = katec_to_wgs84(gis_x, gis_y)
                             if end_lat is not None and end_lon is not None:
-                                tasks.append(_fetch_tmap_distance(session, self.tmap_key, lat, lon, end_lat, end_lon))
+                                dist_tasks.append(_fetch_tmap_distance(session, self.tmap_key, lat, lon, end_lat, end_lon))
+                                addr_tasks.append(_fetch_tmap_address(session, self.tmap_key, end_lat, end_lon))
+                                addr_indices.append(i)
                             else:
-                                tasks.append(None)
+                                dist_tasks.append(None)
                         
-                        tmap_distances = await asyncio.gather(*tasks, return_exceptions=True)
+                        tmap_distances = await asyncio.gather(*dist_tasks, return_exceptions=True)
+                        tmap_addresses = await asyncio.gather(*addr_tasks, return_exceptions=True) if addr_tasks else []
+                        
                         for i, s in enumerate(stations):
                             dist = tmap_distances[i]
                             if isinstance(dist, (int, float)):
-                                s["_TMAP_DISTANCE"] = dist  # meters
+                                s["_TMAP_DISTANCE"] = dist
                             elif isinstance(dist, Exception):
-                                _LOGGER.debug("Tmap error for %s: %s", s.get("OS_NM"), dist)
+                                _LOGGER.debug("Tmap distance error for %s: %s", s.get("OS_NM"), dist)
+                        
+                        for j, idx in enumerate(addr_indices):
+                            addr = tmap_addresses[j] if j < len(tmap_addresses) else ("", "")
+                            if isinstance(addr, tuple) and len(addr) == 2:
+                                stations[idx]["_TMAP_ADDRESS"] = addr[0]
+                                stations[idx]["_TMAP_SHORT_ADDR"] = addr[1]
+                            elif isinstance(addr, Exception):
+                                _LOGGER.debug("Tmap address error for %s: %s", stations[idx].get("OS_NM"), addr)
                     
                     # 정렬
                     if self.sort_order == "주행거리순":
@@ -411,9 +445,14 @@ class OpinetStationSensor(CoordinatorEntity, SensorEntity):
         stations = self.coordinator.data
         if stations and len(stations) > self._index:
             s = stations[self._index]
-            full_addr = s.get("VAN_ADR", "주소 정보 없음")
-            parts = full_addr.split(" ", 1)
-            short_addr = parts[1] if len(parts) > 1 and len(parts[1]) > 0 else full_addr
+            # 주소: Tmap 역지오코딩 우선
+            full_addr = s.get("_TMAP_ADDRESS") or s.get("VAN_ADR") or ""
+            if not full_addr:
+                full_addr = f"{s['OS_NM']} (주소 정보 없음)"
+            short_addr = s.get("_TMAP_SHORT_ADDR") or ""
+            if not short_addr:
+                parts = full_addr.split(" ", 1)
+                short_addr = parts[1] if len(parts) > 1 and parts[1] else full_addr
             # 거리: Tmap 주행거리 우선
             tmap_dist = s.get("_TMAP_DISTANCE")
             dist_str = f"{float(tmap_dist)/1000:.1f} km" if tmap_dist is not None else f"{float(s.get('DISTANCE', 0))/1000:.1f} km"
