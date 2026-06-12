@@ -15,7 +15,7 @@ _LOGGER = logging.getLogger(__name__)
 
 async def async_setup_entry(hass, entry, async_add_entities):
     api_key = entry.data.get(CONF_API_KEY)
-    radius = entry.options.get(CONF_RADIUS, entry.data.get(CONF_RADIUS, 5000))
+    radius = int(entry.options.get(CONF_RADIUS, entry.data.get(CONF_RADIUS, 5000)))
     prodcd = entry.data.get(CONF_PRODCD, "B027")
     location_entity = entry.data.get(CONF_LOCATION_ENTITY)
     poll_div = entry.options.get(CONF_POLL_DIV, entry.data.get(CONF_POLL_DIV))
@@ -112,10 +112,10 @@ class OpinetDataUpdateCoordinator(DataUpdateCoordinator):
         kx, ky = self.converter.wgs84_to_katec(lat, lon)
         kx_int, ky_int = int(kx), int(ky)
         
-        url = f"https://www.opinet.co.kr/api/aroundAll.do?code={self.api_key}&x={kx_int}&y={ky_int}&radius={self.radius}&prodcd={self.prodcd}&sort=1&out=json"
+        url = f"https://www.opinet.co.kr/api/aroundAll.do?code={self.api_key}&x={kx_int}&y={ky_int}&radius={int(self.radius)}&prodcd={self.prodcd}&sort=1&out=json"
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
 
-        _LOGGER.error(
+        _LOGGER.debug(
             "Calling Opinet API. URL: %s, Params - API Key: %s, Radius: %s, Prod Code: %s, Location Entity: %s",
             url,
             self.api_key,
