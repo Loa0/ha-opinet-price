@@ -26,7 +26,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
     # 상위 10개 주유소에 대한 개별 센서 생성
     sensors = []
     for i in range(10):
-        sensors.append(OpinetStationSensor(coordinator, i, location_entity))
+        sensors.append(OpinetStationSensor(coordinator, entry, i, location_entity))
     
     async_add_entities(sensors)
 
@@ -134,18 +134,14 @@ class OpinetDataUpdateCoordinator(DataUpdateCoordinator):
             raise UpdateFailed(f"Error communicating with API: {e}")
 
 class OpinetStationSensor(CoordinatorEntity, SensorEntity):
-    def __init__(self, coordinator, index, location_entity):
+    def __init__(self, coordinator, entry, index, location_entity):
         super().__init__(coordinator)
         self._index = index
         self._location_entity = location_entity
         self._attr_unique_id = f"opinet_price_{self._location_entity or 'home'}_{index + 1}"
         self._attr_icon = "mdi:gas-station"
-
-    @property
-    def device_info(self) -> DeviceInfo:
-        """Return device registry information."""
-        return DeviceInfo(
-            identifiers={(DOMAIN, self.coordinator.config_entry.entry_id)},
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, entry.entry_id)},
             name="오피넷 주유소",
             manufacturer="Opinet",
             model="주유소 가격 비교",
