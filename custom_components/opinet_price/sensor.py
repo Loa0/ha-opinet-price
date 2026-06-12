@@ -7,6 +7,7 @@ from datetime import timedelta
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, CoordinatorEntity, UpdateFailed
+from homeassistant.helpers.device_registry import DeviceInfo
 
 from .const import DOMAIN, CONF_API_KEY, CONF_RADIUS, CONF_PRODCD, CONF_LOCATION_ENTITY, CONF_POLL_DIV, PROD_CODES
 
@@ -19,7 +20,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
     location_entity = entry.data.get(CONF_LOCATION_ENTITY)
     poll_div = entry.options.get(CONF_POLL_DIV, entry.data.get(CONF_POLL_DIV))
 
-    coordinator = OpinetDataUpdateCoordinator(hass, api_key, radius, prodcd, location_entity, poll_div)
+    coordinator = OpinetDataUpdateCoordinator(hass, entry, api_key, radius, prodcd, location_entity, poll_div)
     await coordinator.async_config_entry_first_refresh()
 
     # 상위 10개 주유소에 대한 개별 센서 생성
@@ -77,13 +78,14 @@ class KatecConverter:
         return self.bessel_a * ((1 - 0.00667437223131/4 - 3*(0.00667437223131**2)/64) * lat - (3*0.00667437223131/8 + 3*(0.00667437223131**2)/32) * math.sin(2*lat) + (15*(0.00667437223131**2)/256) * math.sin(4*lat))
 
 class OpinetDataUpdateCoordinator(DataUpdateCoordinator):
-    def __init__(self, hass, api_key, radius, prodcd, location_entity, poll_div=None):
+    def __init__(self, hass, entry, api_key, radius, prodcd, location_entity, poll_div=None):
         super().__init__(
             hass,
             _LOGGER,
             name=DOMAIN,
             update_interval=timedelta(hours=3),
         )
+        self.config_entry = entry
         self.api_key = api_key
         self.radius = radius
         self.prodcd = prodcd
@@ -143,6 +145,16 @@ class OpinetStationSensor(CoordinatorEntity, SensorEntity):
         self._attr_icon = "mdi:gas-station"
 
     @property
+    def device_info(self) -> DeviceInfo:
+        """Return device registry information."""
+        return DeviceInfo(
+            identifiers={(DOMAIN, self.coordinator.config_entry.entry_id)},
+            name="오피넷 주유소",
+            manufacturer="Opinet",
+            model="주유소 가격 비교",
+        )
+
+    @property
     def name(self):
         return f"{self._index + 1}위"
 
@@ -194,6 +206,16 @@ class OpinetCombinedSensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f"opinet_price_{self._location_entity or 'home'}_combined"
         self._attr_icon = "mdi:gas-station"
         self._attr_name = "오피넷 주유소 목록"
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return device registry information."""
+        return DeviceInfo(
+            identifiers={(DOMAIN, self.coordinator.config_entry.entry_id)},
+            name="오피넷 주유소",
+            manufacturer="Opinet",
+            model="주유소 가격 비교",
+        )
 
     @property
     def state(self):
