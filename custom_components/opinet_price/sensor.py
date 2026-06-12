@@ -18,6 +18,7 @@ from .const import (
     CONF_POLL_DIV,
     CONF_SELF_ONLY,
     CONF_HIGHWAY_FILTER,
+    CONF_MAX_DISTANCE,
     PROD_CODES,
 )
 
@@ -38,6 +39,11 @@ async def async_setup_entry(hass, entry, async_add_entities):
     )
     self_only = entry.options.get(CONF_SELF_ONLY, entry.data.get(CONF_SELF_ONLY, False))
     highway_filter = entry.options.get(CONF_HIGHWAY_FILTER, entry.data.get(CONF_HIGHWAY_FILTER, "전체"))
+    max_distance_km = entry.options.get(CONF_MAX_DISTANCE, entry.data.get(CONF_MAX_DISTANCE))
+    if max_distance_km is None:
+        max_distance_km = radius / 1000.0
+    else:
+        max_distance_km = float(max_distance_km)
     
     _LOGGER.debug(
         "Setting up Opinet Price entry. options: %s, data: %s, poll_div: %s, self_only: %s, highway_filter: %s",
@@ -58,6 +64,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         poll_div,
         self_only,
         highway_filter,
+        max_distance_km,
     )
     await coordinator.async_config_entry_first_refresh()
 
@@ -113,7 +120,7 @@ class KatecConverter:
         return self.bessel_a * ((1 - 0.00667437223131/4 - 3*(0.00667437223131**2)/64) * lat - (3*0.00667437223131/8 + 3*(0.00667437223131**2)/32) * math.sin(2*lat) + (15*(0.00667437223131**2)/256) * math.sin(4*lat))
 
 class OpinetDataUpdateCoordinator(DataUpdateCoordinator):
-    def __init__(self, hass, entry, api_key, radius, prodcd, location_entity, poll_div=None, self_only=False, highway_filter="전체"):
+    def __init__(self, hass, entry, api_key, radius, prodcd, location_entity, poll_div=None, self_only=False, highway_filter="전체", max_distance_km=None):
         super().__init__(
             hass,
             _LOGGER,
@@ -128,6 +135,7 @@ class OpinetDataUpdateCoordinator(DataUpdateCoordinator):
         self.poll_div = poll_div
         self.self_only = self_only
         self.highway_filter = highway_filter
+        self.max_distance_km = max_distance_km
         self.converter = KatecConverter()
 
     async def _async_update_data(self):
@@ -216,6 +224,19 @@ class OpinetDataUpdateCoordinator(DataUpdateCoordinator):
                             len(stations),
                         )
                     
+                    # 4. 거리 필터링 적용
+                    if self.max_distance_km is not None and stations:
+                        max_dist_m = float(self.max_distance_km) * 1000
+                        stations = [
+                            s for s in stations
+                            if float(s.get("DISTANCE", 0)) <= max_dist_m
+                        ]
+                        _LOGGER.debug(
+                            "Filtered stations by max distance %.1fkm: %d stations remaining",
+                            self.max_distance_km,
+                            len(stations),
+                        )
+
                     if stations:
                         stations.sort(key=lambda x: int(x["PRICE"]))
                     

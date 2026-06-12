@@ -6,6 +6,7 @@ CONF_LOCATION_ENTITY = "location_entity"
 CONF_POLL_DIV = "주유소 필터"
 CONF_SELF_ONLY = "셀프주유소만"
 CONF_HIGHWAY_FILTER = "고속도로"
+CONF_MAX_DISTANCE = "최대거리"
 
 HIGHWAY_OPTIONS = ["전체", "고속도로만", "고속도로 제외"]
 
