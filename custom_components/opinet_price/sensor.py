@@ -428,7 +428,7 @@ class OpinetStationSensor(CoordinatorEntity, SensorEntity):
         stations = self.coordinator.data
         if stations and len(stations) > self._index:
             s = stations[self._index]
-            base = f"{s['OS_NM']}: {int(s['PRICE']):,}원"
+            base = f"{s['OS_NM']}:\n{int(s['PRICE']):,}원"
             if self._show_distance:
                 # Tmap 주행거리 우선, 없으면 Opinet 직선거리
                 tmap_dist = s.get("_TMAP_DISTANCE")
