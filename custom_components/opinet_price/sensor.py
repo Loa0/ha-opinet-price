@@ -14,7 +14,7 @@ _LOGGER = logging.getLogger(__name__)
 
 async def async_setup_entry(hass, entry, async_add_entities):
     api_key = entry.data.get(CONF_API_KEY)
-    radius = entry.data.get(CONF_RADIUS, 5000)
+    radius = entry.options.get(CONF_RADIUS, entry.data.get(CONF_RADIUS, 5000))
     prodcd = entry.data.get(CONF_PRODCD, "B027")
     location_entity = entry.data.get(CONF_LOCATION_ENTITY)
     poll_div = entry.options.get(CONF_POLL_DIV, entry.data.get(CONF_POLL_DIV))

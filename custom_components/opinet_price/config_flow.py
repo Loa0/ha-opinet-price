@@ -23,11 +23,21 @@ class OpinetPriceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
         )
 
+        radius_selector = selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=500,
+                max=20000,
+                step=100,
+                unit_of_measurement="m",
+                mode=selector.NumberSelectorMode.SLIDER,
+            )
+        )
+
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema({
                 vol.Required(CONF_API_KEY): str,
-                vol.Optional(CONF_RADIUS, default=5000): int,
+                vol.Optional(CONF_RADIUS, default=5000): radius_selector,
                 vol.Optional(CONF_PRODCD, default="B027"): vol.In(PROD_CODES),
                 vol.Optional(CONF_LOCATION_ENTITY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain=["device_tracker", "person"])
@@ -59,6 +69,16 @@ class OpinetPriceOptionsFlowHandler(config_entries.OptionsFlow):
             )
         )
 
+        radius_selector = selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=500,
+                max=20000,
+                step=100,
+                unit_of_measurement="m",
+                mode=selector.NumberSelectorMode.SLIDER,
+            )
+        )
+
         current_value = self.config_entry.options.get(
             CONF_POLL_DIV,
             self.config_entry.data.get(CONF_POLL_DIV)
@@ -74,10 +94,18 @@ class OpinetPriceOptionsFlowHandler(config_entries.OptionsFlow):
             step_id="init",
             data_schema=vol.Schema({
                 vol.Optional(
+                    CONF_RADIUS,
+                    default=self.config_entry.options.get(
+                        CONF_RADIUS,
+                        self.config_entry.data.get(CONF_RADIUS, 5000)
+                    )
+                ): radius_selector,
+                vol.Optional(
                     CONF_POLL_DIV,
                     default=default_value
                 ): brand_selector,
             })
         )
+
 
 
