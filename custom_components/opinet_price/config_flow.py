@@ -4,7 +4,19 @@ from homeassistant.core import callback
 from homeassistant.helpers import selector
 import homeassistant.helpers.config_validation as cv
 
-from .const import DOMAIN, CONF_API_KEY, CONF_RADIUS, CONF_PRODCD, CONF_LOCATION_ENTITY, CONF_POLL_DIV, PROD_CODES, BRAND_CODES
+from .const import (
+    DOMAIN,
+    CONF_API_KEY,
+    CONF_RADIUS,
+    CONF_PRODCD,
+    CONF_LOCATION_ENTITY,
+    CONF_POLL_DIV,
+    CONF_SELF_ONLY,
+    CONF_HIGHWAY_FILTER,
+    PROD_CODES,
+    BRAND_CODES,
+    HIGHWAY_OPTIONS,
+)
 
 class OpinetPriceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
@@ -58,9 +70,24 @@ class OpinetPriceOptionsFlowHandler(config_entries.OptionsFlow):
             )
         )
 
+        self_only_selector = selector.BooleanSelector()
+
+        highway_selector = selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                options=HIGHWAY_OPTIONS,
+                mode=selector.SelectSelectorMode.DROPDOWN,
+            )
+        )
+
         current_value = self.config_entry.options.get(
             CONF_POLL_DIV,
-            self.config_entry.data.get(CONF_POLL_DIV)
+            self.config_entry.data.get(
+                CONF_POLL_DIV,
+                self.config_entry.options.get(
+                    "poll_div",
+                    self.config_entry.data.get("poll_div")
+                )
+            )
         )
         if isinstance(current_value, str) and current_value:
             default_value = [b.strip() for b in current_value.split(",") if b.strip()]
@@ -68,6 +95,16 @@ class OpinetPriceOptionsFlowHandler(config_entries.OptionsFlow):
             default_value = current_value
         else:
             default_value = []
+
+        default_self_only = self.config_entry.options.get(
+            CONF_SELF_ONLY,
+            self.config_entry.data.get(CONF_SELF_ONLY, False)
+        )
+
+        default_highway = self.config_entry.options.get(
+            CONF_HIGHWAY_FILTER,
+            self.config_entry.data.get(CONF_HIGHWAY_FILTER, "전체")
+        )
 
         return self.async_show_form(
             step_id="init",
@@ -83,6 +120,14 @@ class OpinetPriceOptionsFlowHandler(config_entries.OptionsFlow):
                     CONF_POLL_DIV,
                     default=default_value
                 ): brand_selector,
+                vol.Optional(
+                    CONF_SELF_ONLY,
+                    default=default_self_only
+                ): self_only_selector,
+                vol.Optional(
+                    CONF_HIGHWAY_FILTER,
+                    default=default_highway
+                ): highway_selector,
             })
         )
 

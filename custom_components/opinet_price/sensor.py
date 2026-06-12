@@ -9,7 +9,17 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, CoordinatorEntity, UpdateFailed
 from homeassistant.helpers.device_registry import DeviceInfo
 
-from .const import DOMAIN, CONF_API_KEY, CONF_RADIUS, CONF_PRODCD, CONF_LOCATION_ENTITY, CONF_POLL_DIV, PROD_CODES
+from .const import (
+    DOMAIN,
+    CONF_API_KEY,
+    CONF_RADIUS,
+    CONF_PRODCD,
+    CONF_LOCATION_ENTITY,
+    CONF_POLL_DIV,
+    CONF_SELF_ONLY,
+    CONF_HIGHWAY_FILTER,
+    PROD_CODES,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -18,16 +28,37 @@ async def async_setup_entry(hass, entry, async_add_entities):
     radius = int(entry.options.get(CONF_RADIUS, entry.data.get(CONF_RADIUS, 5000)))
     prodcd = entry.data.get(CONF_PRODCD, "B027")
     location_entity = entry.data.get(CONF_LOCATION_ENTITY)
-    poll_div = entry.options.get(CONF_POLL_DIV, entry.data.get(CONF_POLL_DIV))
+    
+    poll_div = entry.options.get(
+        CONF_POLL_DIV,
+        entry.data.get(
+            CONF_POLL_DIV,
+            entry.options.get("poll_div", entry.data.get("poll_div"))
+        )
+    )
+    self_only = entry.options.get(CONF_SELF_ONLY, entry.data.get(CONF_SELF_ONLY, False))
+    highway_filter = entry.options.get(CONF_HIGHWAY_FILTER, entry.data.get(CONF_HIGHWAY_FILTER, "전체"))
     
     _LOGGER.debug(
-        "Setting up Opinet Price entry. options: %s, data: %s, poll_div: %s",
+        "Setting up Opinet Price entry. options: %s, data: %s, poll_div: %s, self_only: %s, highway_filter: %s",
         entry.options,
         entry.data,
         poll_div,
+        self_only,
+        highway_filter,
     )
 
-    coordinator = OpinetDataUpdateCoordinator(hass, entry, api_key, radius, prodcd, location_entity, poll_div)
+    coordinator = OpinetDataUpdateCoordinator(
+        hass,
+        entry,
+        api_key,
+        radius,
+        prodcd,
+        location_entity,
+        poll_div,
+        self_only,
+        highway_filter,
+    )
     await coordinator.async_config_entry_first_refresh()
 
     # 상위 10개 주유소에 대한 개별 센서 생성
@@ -82,7 +113,7 @@ class KatecConverter:
         return self.bessel_a * ((1 - 0.00667437223131/4 - 3*(0.00667437223131**2)/64) * lat - (3*0.00667437223131/8 + 3*(0.00667437223131**2)/32) * math.sin(2*lat) + (15*(0.00667437223131**2)/256) * math.sin(4*lat))
 
 class OpinetDataUpdateCoordinator(DataUpdateCoordinator):
-    def __init__(self, hass, entry, api_key, radius, prodcd, location_entity, poll_div=None):
+    def __init__(self, hass, entry, api_key, radius, prodcd, location_entity, poll_div=None, self_only=False, highway_filter="전체"):
         super().__init__(
             hass,
             _LOGGER,
@@ -95,6 +126,8 @@ class OpinetDataUpdateCoordinator(DataUpdateCoordinator):
         self.prodcd = prodcd
         self.location_entity = location_entity
         self.poll_div = poll_div
+        self.self_only = self_only
+        self.highway_filter = highway_filter
         self.converter = KatecConverter()
 
     async def _async_update_data(self):
@@ -143,7 +176,7 @@ class OpinetDataUpdateCoordinator(DataUpdateCoordinator):
                     
                     _LOGGER.debug("Retrieved %d stations from Opinet API", len(stations))
                     
-                    # 브랜드 필터링 적용
+                    # 1. 브랜드 필터링 적용
                     if self.poll_div and stations:
                         if isinstance(self.poll_div, list):
                             allowed_brands = self.poll_div
@@ -159,6 +192,29 @@ class OpinetDataUpdateCoordinator(DataUpdateCoordinator):
                             )
                     else:
                         _LOGGER.debug("Brand filtering not applied. poll_div: %s", self.poll_div)
+
+                    # 2. 셀프 필터링 적용
+                    if self.self_only and stations:
+                        stations = [s for s in stations if "셀프" in s.get("OS_NM", "")]
+                        _LOGGER.debug("Filtered stations by self-service: %d stations remaining", len(stations))
+
+                    # 3. 고속도로 필터링 적용
+                    if self.highway_filter and self.highway_filter != "전체" and stations:
+                        if self.highway_filter == "고속도로만":
+                            stations = [
+                                s for s in stations 
+                                if s.get("POLL_DIV_CD") == "RTX" or "휴게소" in s.get("OS_NM", "")
+                            ]
+                        elif self.highway_filter == "고속도로 제외":
+                            stations = [
+                                s for s in stations 
+                                if not (s.get("POLL_DIV_CD") == "RTX" or "휴게소" in s.get("OS_NM", ""))
+                            ]
+                        _LOGGER.debug(
+                            "Filtered stations by highway filter (%s): %d stations remaining",
+                            self.highway_filter,
+                            len(stations),
+                        )
                     
                     if stations:
                         stations.sort(key=lambda x: int(x["PRICE"]))
