@@ -115,6 +115,15 @@ class OpinetDataUpdateCoordinator(DataUpdateCoordinator):
         url = f"https://www.opinet.co.kr/api/aroundAll.do?code={self.api_key}&x={kx_int}&y={ky_int}&radius={self.radius}&prodcd={self.prodcd}&sort=1&out=json"
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
 
+        _LOGGER.error(
+            "Calling Opinet API. URL: %s, Params - API Key: %s, Radius: %s, Prod Code: %s, Location Entity: %s",
+            url,
+            self.api_key,
+            self.radius,
+            self.prodcd,
+            self.location_entity,
+        )
+
         try:
             async with async_timeout.timeout(15):
                 session = async_get_clientsession(self.hass)
@@ -156,6 +165,7 @@ class OpinetDataUpdateCoordinator(DataUpdateCoordinator):
                     
                     return stations
         except Exception as e:
+            _LOGGER.error("Exception in Opinet API update: %s", e, exc_info=True)
             raise UpdateFailed(f"Error communicating with API: {e}")
 
 class OpinetStationSensor(CoordinatorEntity, SensorEntity):
