@@ -28,9 +28,6 @@ async def async_setup_entry(hass, entry, async_add_entities):
     for i in range(10):
         sensors.append(OpinetStationSensor(coordinator, i, location_entity))
     
-    # 통합 센서 추가: 10개 주유소 정보를 하나의 엔티티로 제공
-    sensors.append(OpinetCombinedSensor(coordinator, location_entity, radius, prodcd))
-    
     async_add_entities(sensors)
 
 class KatecConverter:
@@ -185,94 +182,3 @@ class OpinetStationSensor(CoordinatorEntity, SensorEntity):
                 "순위": self._index + 1
             }
         return {}
-
-class OpinetCombinedSensor(CoordinatorEntity, SensorEntity):
-    """하나의 통합 엔티티로 10개 주유소 정보를 모두 제공하는 센서"""
-
-    def __init__(self, coordinator, location_entity, radius, prodcd):
-        """통합 센서 초기화.
-
-        Args:
-            coordinator: OpinetDataUpdateCoordinator 인스턴스
-            location_entity: 위치 추적 엔티티 ID
-            radius: 검색 반경 (미터)
-            prodcd: 유종 코드 (예: B027=휘발유)
-        """
-        super().__init__(coordinator)
-        self._location_entity = location_entity
-        self._radius = radius
-        self._prodcd = prodcd
-        # 고유 ID에 'combined'를 포함하여 개별 센서와 구분
-        self._attr_unique_id = f"opinet_price_{self._location_entity or 'home'}_combined"
-        self._attr_icon = "mdi:gas-station"
-        self._attr_name = "오피넷 주유소 목록"
-
-    @property
-    def device_info(self) -> DeviceInfo:
-        """Return device registry information."""
-        return DeviceInfo(
-            identifiers={(DOMAIN, self.coordinator.config_entry.entry_id)},
-            name="오피넷 주유소",
-            manufacturer="Opinet",
-            model="주유소 가격 비교",
-        )
-
-    @property
-    def state(self):
-        """가장 저렴한 주유소 정보를 state로 표시"""
-        stations = self.coordinator.data
-        if stations and len(stations) > 0:
-            cheapest = stations[0]  # 가격순 정렬되어 있으므로 첫 번째가 최저가
-            return f"최저가: {cheapest['OS_NM']} {int(cheapest['PRICE']):,}원"
-        return "주유소 정보 없음"
-
-    @property
-    def extra_state_attributes(self):
-        """10개 주유소 목록과 검색 기준 정보를 attributes로 제공"""
-        stations = self.coordinator.data
-        if not stations:
-            return {
-                "주유소목록": [],
-                "최저가주유소": None,
-                "최저가격": None,
-                "검색기준": {
-                    "위치": self._location_entity or "홈",
-                    "반경": f"{int(self._radius / 1000)}km",
-                    "유종": PROD_CODES.get(self._prodcd, self._prodcd)
-                }
-            }
-
-        # 주유소 목록 구성 (각 주유소 정보를 딕셔너리로 변환)
-        juyuso_list = []
-        for idx, s in enumerate(stations[:10]):
-            full_addr = s.get("VAN_ADR", "주소 정보 없음")
-            # 간략 주소: 첫 번째 공백 기준 앞부분(시/도)을 제외한 나머지
-            parts = full_addr.split(" ", 1)
-            short_addr = parts[1] if len(parts) > 1 and len(parts[1]) > 0 else full_addr
-            try:
-                distance_km = f"{float(s['DISTANCE']) / 1000:.1f} km"
-            except (ValueError, KeyError):
-                distance_km = "정보 없음"
-
-            juyuso_list.append({
-                "순위": idx + 1,
-                "주유소명": s["OS_NM"],
-                "가격": int(s["PRICE"]),
-                "주소": full_addr,
-                "간략주소": short_addr,
-                "브랜드": s.get("POLL_DIV_CD", "정보 없음"),
-                "거리": distance_km
-            })
-
-        cheapest = stations[0]
-
-        return {
-            "주유소목록": juyuso_list,
-            "최저가주유소": cheapest["OS_NM"],
-            "최저가격": int(cheapest["PRICE"]),
-            "검색기준": {
-                "위치": self._location_entity or "홈",
-                "반경": f"{int(self._radius / 1000)}km",
-                "유종": PROD_CODES.get(self._prodcd, self._prodcd)
-            }
-        }
