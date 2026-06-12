@@ -247,7 +247,7 @@ class OpinetStationSensor(CoordinatorEntity, SensorEntity):
         stations = self.coordinator.data
         if stations and len(stations) > self._index:
             s = stations[self._index]
-            return f"{s['OS_NM']}: {int(s['PRICE']):,}원"
+            return f"{s['OS_NM']}: {int(s['PRICE']):,}원 ({float(s['DISTANCE'])/1000:.1f}km)"
         return "검색 결과 없음"
 
     @property
