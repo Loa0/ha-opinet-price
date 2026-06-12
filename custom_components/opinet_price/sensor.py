@@ -8,7 +8,7 @@ from homeassistant.components.sensor import SensorEntity
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, CoordinatorEntity, UpdateFailed
 
-from .const import DOMAIN, CONF_API_KEY, CONF_RADIUS, CONF_PRODCD, CONF_LOCATION_ENTITY, PROD_CODES
+from .const import DOMAIN, CONF_API_KEY, CONF_RADIUS, CONF_PRODCD, CONF_LOCATION_ENTITY, CONF_POLL_DIV, PROD_CODES
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -17,8 +17,9 @@ async def async_setup_entry(hass, entry, async_add_entities):
     radius = entry.data.get(CONF_RADIUS, 5000)
     prodcd = entry.data.get(CONF_PRODCD, "B027")
     location_entity = entry.data.get(CONF_LOCATION_ENTITY)
+    poll_div = entry.options.get(CONF_POLL_DIV, entry.data.get(CONF_POLL_DIV))
 
-    coordinator = OpinetDataUpdateCoordinator(hass, api_key, radius, prodcd, location_entity)
+    coordinator = OpinetDataUpdateCoordinator(hass, api_key, radius, prodcd, location_entity, poll_div)
     await coordinator.async_config_entry_first_refresh()
 
     # 상위 10개 주유소에 대한 개별 센서 생성
@@ -76,7 +77,7 @@ class KatecConverter:
         return self.bessel_a * ((1 - 0.00667437223131/4 - 3*(0.00667437223131**2)/64) * lat - (3*0.00667437223131/8 + 3*(0.00667437223131**2)/32) * math.sin(2*lat) + (15*(0.00667437223131**2)/256) * math.sin(4*lat))
 
 class OpinetDataUpdateCoordinator(DataUpdateCoordinator):
-    def __init__(self, hass, api_key, radius, prodcd, location_entity):
+    def __init__(self, hass, api_key, radius, prodcd, location_entity, poll_div=None):
         super().__init__(
             hass,
             _LOGGER,
@@ -87,6 +88,7 @@ class OpinetDataUpdateCoordinator(DataUpdateCoordinator):
         self.radius = radius
         self.prodcd = prodcd
         self.location_entity = location_entity
+        self.poll_div = poll_div
         self.converter = KatecConverter()
 
     async def _async_update_data(self):
@@ -118,6 +120,14 @@ class OpinetDataUpdateCoordinator(DataUpdateCoordinator):
                     res = json.loads(body)
                     stations = res.get("RESULT", {}).get("OIL", [])
                     if stations:
+                        # 브랜드 필터링 적용
+                        if self.poll_div:
+                            if isinstance(self.poll_div, list):
+                                allowed_brands = self.poll_div
+                            else:
+                                allowed_brands = [b.strip() for b in self.poll_div.split(",") if b.strip()]
+                            if allowed_brands:
+                                stations = [s for s in stations if s.get("POLL_DIV_CD") in allowed_brands]
                         stations.sort(key=lambda x: int(x["PRICE"]))
                         return stations
                     return []
