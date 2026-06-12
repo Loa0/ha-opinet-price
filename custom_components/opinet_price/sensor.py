@@ -26,7 +26,15 @@ _LOGGER = logging.getLogger(__name__)
 
 async def async_setup_entry(hass, entry, async_add_entities):
     api_key = entry.data.get(CONF_API_KEY)
-    radius = int(entry.options.get(CONF_RADIUS, entry.data.get(CONF_RADIUS, 5000)))
+    radius_raw = entry.options.get(CONF_RADIUS, entry.data.get(CONF_RADIUS, 5.0))
+    # km → m 변환 (하위 호환: 100 초과면 이미 m 단위)
+    if isinstance(radius_raw, (int, float)):
+        if radius_raw < 100:
+            radius = int(float(radius_raw) * 1000)
+        else:
+            radius = int(radius_raw)
+    else:
+        radius = int(radius_raw)
     prodcd = entry.data.get(CONF_PRODCD, "B027")
     location_entity = entry.data.get(CONF_LOCATION_ENTITY)
     

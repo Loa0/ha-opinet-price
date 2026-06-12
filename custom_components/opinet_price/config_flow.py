@@ -63,10 +63,10 @@ class OpinetPriceOptionsFlowHandler(config_entries.OptionsFlow):
 
         radius_selector = selector.NumberSelector(
             selector.NumberSelectorConfig(
-                min=500,
-                max=20000,
-                step=100,
-                unit_of_measurement="m",
+                min=0.5,
+                max=20,
+                step=0.1,
+                unit_of_measurement="km",
                 mode=selector.NumberSelectorMode.SLIDER,
             )
         )
@@ -109,6 +109,14 @@ class OpinetPriceOptionsFlowHandler(config_entries.OptionsFlow):
             self.config_entry.data.get(CONF_HIGHWAY_FILTER, "전체")
         )
 
+        default_radius = self.config_entry.options.get(
+            CONF_RADIUS,
+            self.config_entry.data.get(CONF_RADIUS, 5.0)
+        )
+        # 하위 호환: 기존 m 단위(>100)를 km로 변환
+        if isinstance(default_radius, (int, float)) and default_radius > 100:
+            default_radius = default_radius / 1000.0
+
         default_show_distance = self.config_entry.options.get(
             CONF_MAX_DISTANCE,
             self.config_entry.data.get(CONF_MAX_DISTANCE, True)
@@ -119,10 +127,7 @@ class OpinetPriceOptionsFlowHandler(config_entries.OptionsFlow):
             data_schema=vol.Schema({
                 vol.Optional(
                     CONF_RADIUS,
-                    default=self.config_entry.options.get(
-                        CONF_RADIUS,
-                        self.config_entry.data.get(CONF_RADIUS, 5000)
-                    )
+                    default=default_radius
                 ): radius_selector,
                 vol.Optional(
                     CONF_POLL_DIV,
