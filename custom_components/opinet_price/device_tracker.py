@@ -50,7 +50,23 @@ class OpinetDeviceTracker(CoordinatorEntity, TrackerEntity):
     @property
     def name(self):
         s = self._get_station()
-        return f"{s['OS_NM']} (주유소)" if s else f"주유소 #{self._index}"
+        return f"{self._index + 1}위" if s else f"주유소 #{self._index}"
+
+    @property
+    def extra_state_attributes(self):
+        s = self._get_station()
+        if not s:
+            return {}
+        tmap_dist = s.get("_TMAP_DISTANCE")
+        dist_str = f"{float(tmap_dist) / 1000:.1f} km" if tmap_dist is not None else f"{float(s.get('DISTANCE', 0)) / 1000:.1f} km"
+        return {
+            "상호명": s["OS_NM"],
+            "가격": int(s["PRICE"]),
+            "가격표시": f"{int(s['PRICE']):,}원",
+            "주소": s.get("_TMAP_ADDRESS") or s.get("VAN_ADR", ""),
+            "브랜드": s["POLL_DIV_CD"],
+            "거리": dist_str,
+        }
 
     @property
     def latitude(self):
