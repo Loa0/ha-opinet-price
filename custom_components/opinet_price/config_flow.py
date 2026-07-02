@@ -68,7 +68,7 @@ class OpinetPriceOptionsFlowHandler(config_entries.OptionsFlow):
         """Menu: choose between filters and favorites."""
         return self.async_show_menu(
             step_id="init",
-            menu_options=["filters", "favorites"],
+            menu_options={"filters": "필터 설정", "favorites": "즐겨찾기 관리"},
         )
 
     async def async_step_filters(self, user_input=None):
