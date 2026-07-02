@@ -32,7 +32,7 @@ TMAP_ROUTE_URL = "https://apis.openapi.sk.com/tmap/routes?version=1"
 TMAP_GEO_URL = "https://apis.openapi.sk.com/tmap/geo/reversegeocoding?version=1"
 
 async def async_setup_entry(hass, entry, async_add_entities):
-    api_key = entry.data.get(CONF_API_KEY)
+    api_key = entry.options.get(CONF_API_KEY, entry.data.get(CONF_API_KEY))
     radius_raw = entry.options.get(CONF_RADIUS, entry.data.get(CONF_RADIUS, 5.0))
     # km → m 변환 (하위 호환: 100 초과면 이미 m 단위)
     if isinstance(radius_raw, (int, float)):

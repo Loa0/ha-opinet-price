@@ -35,26 +35,16 @@ class OpinetPriceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 return self.async_create_entry(title="오피넷 주유소", data=user_input)
 
         sort_selector = selector.SelectSelector(
-            selector.SelectSelectorConfig(
-                options=SORT_OPTIONS,
-                mode=selector.SelectSelectorMode.DROPDOWN,
-            )
-        )
+            selector.SelectSelectorConfig(options=SORT_OPTIONS, mode=selector.SelectSelectorMode.DROPDOWN))
 
-        return self.async_show_form(
-            step_id="user",
-            data_schema=vol.Schema({
-                vol.Required(CONF_API_KEY): str,
-                vol.Required(CONF_SORT_ORDER, default="가격순"): sort_selector,
-                vol.Optional(CONF_TMAP_KEY, default=""): str,
-                vol.Optional(CONF_PRODCD, default="B027"): vol.In(PROD_CODES),
-                vol.Optional(CONF_LOCATION_ENTITY): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain=["device_tracker", "person"])
-                ),
-            }),
-            errors=errors,
-        )
-
+        return self.async_show_form(step_id="user", data_schema=vol.Schema({
+            vol.Required(CONF_API_KEY): str,
+            vol.Required(CONF_SORT_ORDER, default="가격순"): sort_selector,
+            vol.Optional(CONF_TMAP_KEY, default=""): str,
+            vol.Optional(CONF_PRODCD, default="B027"): vol.In(PROD_CODES),
+            vol.Optional(CONF_LOCATION_ENTITY): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain=["device_tracker", "person"])),
+        }), errors=errors)
 
     @staticmethod
     @callback
@@ -64,61 +54,55 @@ class OpinetPriceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 class OpinetPriceOptionsFlowHandler(config_entries.OptionsFlow):
 
     async def async_step_init(self, user_input=None):
-        """Step 1: API keys."""
-        if user_input is not None:
-            self._api_data = user_input
-            return await self.async_step_filters()
+        return self.async_show_menu(
+            step_id="init",
+            menu_options={"api": "API 키", "filters": "필터 설정", "favorites": "즐겨찾기 관리"},
+        )
 
-        return self.async_show_form(step_id="init", data_schema=vol.Schema({
-            vol.Required(CONF_API_KEY, default=self.config_entry.data.get(CONF_API_KEY, "")): str,
-            vol.Optional(CONF_TMAP_KEY, default=self.config_entry.data.get(CONF_TMAP_KEY, self.config_entry.options.get(CONF_TMAP_KEY, ""))): str,
+    async def async_step_api(self, user_input=None):
+        if user_input is not None:
+            # 기존 옵션 유지
+            user_input.update({k: v for k, v in self.config_entry.options.items()
+                              if k not in user_input})
+            return self.async_create_entry(title="", data=user_input)
+
+        return self.async_show_form(step_id="api", data_schema=vol.Schema({
+            vol.Required(CONF_API_KEY, default=self.config_entry.options.get(CONF_API_KEY, self.config_entry.data.get(CONF_API_KEY, ""))): str,
+            vol.Optional(CONF_TMAP_KEY, default=self.config_entry.options.get(CONF_TMAP_KEY, self.config_entry.data.get(CONF_TMAP_KEY, ""))): str,
         }))
 
     async def async_step_filters(self, user_input=None):
-        """Step 2: filters."""
         if user_input is not None:
-            self._filter_data = user_input
-            return await self.async_step_favorites()
+            user_input.update({k: v for k, v in self.config_entry.options.items()
+                              if k not in user_input})
+            return self.async_create_entry(title="", data=user_input)
 
         brand_options = [{"value": code, "label": name} for code, name in BRAND_CODES.items()]
-        brand_selector = selector.SelectSelector(
-            selector.SelectSelectorConfig(options=brand_options, multiple=True, mode=selector.SelectSelectorMode.DROPDOWN))
-        radius_selector = selector.NumberSelector(
-            selector.NumberSelectorConfig(min=0.5, max=20, step=0.1, unit_of_measurement="km", mode=selector.NumberSelectorMode.SLIDER))
-        self_only_selector = selector.BooleanSelector()
-        highway_selector = selector.SelectSelector(
-            selector.SelectSelectorConfig(options=HIGHWAY_OPTIONS, mode=selector.SelectSelectorMode.DROPDOWN))
-        show_distance_selector = selector.BooleanSelector()
-        sort_selector = selector.SelectSelector(
-            selector.SelectSelectorConfig(options=SORT_OPTIONS, mode=selector.SelectSelectorMode.DROPDOWN))
-
-        current_value = self.config_entry.options.get(
-            CONF_POLL_DIV, self.config_entry.data.get(CONF_POLL_DIV,
-                self.config_entry.options.get("poll_div", self.config_entry.data.get("poll_div"))))
-        default_brands = [b.strip() for b in current_value.split(",") if b.strip()] if isinstance(current_value, str) and current_value else (current_value if isinstance(current_value, list) else [])
-
         opts = self.config_entry.options
         dat = self.config_entry.data
 
+        current_value = opts.get(CONF_POLL_DIV, dat.get(CONF_POLL_DIV,
+            opts.get("poll_div", dat.get("poll_div"))))
+        default_brands = [b.strip() for b in current_value.split(",") if b.strip()] if isinstance(current_value, str) and current_value else (current_value if isinstance(current_value, list) else [])
+
         return self.async_show_form(step_id="filters", data_schema=vol.Schema({
-            vol.Optional(CONF_RADIUS, default=opts.get(CONF_RADIUS, dat.get(CONF_RADIUS, 5.0))): radius_selector,
-            vol.Optional(CONF_POLL_DIV, default=default_brands): brand_selector,
-            vol.Optional(CONF_SELF_ONLY, default=opts.get(CONF_SELF_ONLY, dat.get(CONF_SELF_ONLY, False))): self_only_selector,
-            vol.Optional(CONF_HIGHWAY_FILTER, default=opts.get(CONF_HIGHWAY_FILTER, dat.get(CONF_HIGHWAY_FILTER, "전체"))): highway_selector,
-            vol.Optional(CONF_MAX_DISTANCE, default=opts.get(CONF_MAX_DISTANCE, dat.get(CONF_MAX_DISTANCE, True))): show_distance_selector,
-            vol.Optional(CONF_SORT_ORDER, default=opts.get(CONF_SORT_ORDER, dat.get(CONF_SORT_ORDER, "가격순"))): sort_selector,
+            vol.Optional(CONF_RADIUS, default=opts.get(CONF_RADIUS, dat.get(CONF_RADIUS, 5.0))): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=0.5, max=20, step=0.1, unit_of_measurement="km", mode=selector.NumberSelectorMode.SLIDER)),
+            vol.Optional(CONF_POLL_DIV, default=default_brands): selector.SelectSelector(
+                selector.SelectSelectorConfig(options=brand_options, multiple=True, mode=selector.SelectSelectorMode.DROPDOWN)),
+            vol.Optional(CONF_SELF_ONLY, default=opts.get(CONF_SELF_ONLY, dat.get(CONF_SELF_ONLY, False))): selector.BooleanSelector(),
+            vol.Optional(CONF_HIGHWAY_FILTER, default=opts.get(CONF_HIGHWAY_FILTER, dat.get(CONF_HIGHWAY_FILTER, "전체"))): selector.SelectSelector(
+                selector.SelectSelectorConfig(options=HIGHWAY_OPTIONS, mode=selector.SelectSelectorMode.DROPDOWN)),
+            vol.Optional(CONF_MAX_DISTANCE, default=opts.get(CONF_MAX_DISTANCE, dat.get(CONF_MAX_DISTANCE, True))): selector.BooleanSelector(),
+            vol.Optional(CONF_SORT_ORDER, default=opts.get(CONF_SORT_ORDER, dat.get(CONF_SORT_ORDER, "가격순"))): selector.SelectSelector(
+                selector.SelectSelectorConfig(options=SORT_OPTIONS, mode=selector.SelectSelectorMode.DROPDOWN)),
         }))
 
     async def async_step_favorites(self, user_input=None):
-        """Step 3: favorites + save."""
         if user_input is not None:
-            options = dict(self._filter_data)
-            options[CONF_FAVORITES] = user_input.get(CONF_FAVORITES, [])
-
-            # API keys go to data
-            await self.hass.config_entries.async_update_entry(self.config_entry, data=self._api_data)
-
-            return self.async_create_entry(title="", data=options)
+            user_input.update({k: v for k, v in self.config_entry.options.items()
+                              if k not in user_input})
+            return self.async_create_entry(title="", data=user_input)
 
         stations = []
         coordinator = self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id)
