@@ -17,7 +17,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
     stations = coordinator.data or []
 
     entities = []
-    for i, station in enumerate(stations):
+    for i, station in enumerate(stations[:10]):
         lat, lon = katec_to_wgs84(station.get("GIS_X_COOR"), station.get("GIS_Y_COOR"))
         if lat is not None and lon is not None:
             entities.append(OpinetDeviceTracker(coordinator, entry, i, lat, lon))
