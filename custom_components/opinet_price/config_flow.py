@@ -16,6 +16,7 @@ from .const import (
     CONF_MAX_DISTANCE,
     CONF_TMAP_KEY,
     CONF_SORT_ORDER,
+    CONF_FAVORITES,
     PROD_CODES,
     BRAND_CODES,
     HIGHWAY_OPTIONS,
@@ -63,9 +64,19 @@ class OpinetPriceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 class OpinetPriceOptionsFlowHandler(config_entries.OptionsFlow):
 
-
     async def async_step_init(self, user_input=None):
+        """Menu: choose between filters and favorites."""
+        return self.async_show_menu(
+            step_id="init",
+            menu_options=["filters", "favorites"],
+        )
+
+    async def async_step_filters(self, user_input=None):
+        """Existing filter settings."""
         if user_input is not None:
+            # 즐겨찾기 옵션 보존 (filters 스텝에서 날아가지 않게)
+            existing_fav = self.config_entry.options.get(CONF_FAVORITES, [])
+            user_input[CONF_FAVORITES] = existing_fav
             return self.async_create_entry(title="", data=user_input)
 
         brand_options = [{"value": code, "label": name} for code, name in BRAND_CODES.items()]
@@ -151,7 +162,7 @@ class OpinetPriceOptionsFlowHandler(config_entries.OptionsFlow):
         )
 
         return self.async_show_form(
-            step_id="init",
+            step_id="filters",
             data_schema=vol.Schema({
                 vol.Optional(
                     CONF_RADIUS,
@@ -187,5 +198,64 @@ class OpinetPriceOptionsFlowHandler(config_entries.OptionsFlow):
             })
         )
 
+    async def async_step_favorites(self, user_input=None):
+        """Step 1: search term (optional)."""
+        if user_input is not None:
+            self._fav_search = user_input.get("search", "").strip().lower()
+            return await self.async_step_favorites_select()
 
+        return self.async_show_form(
+            step_id="favorites",
+            data_schema=vol.Schema({
+                vol.Optional("search", default=""): str,
+            }),
+            description_placeholder={"search": "주유소명 검색 (빈 칸=전체)"},
+        )
 
+    async def async_step_favorites_select(self, user_input=None):
+        """Step 2: multi-select from coordinator data, filtered by search term."""
+        if user_input is not None:
+            # 저장
+            return self.async_create_entry(title="", data=user_input)
+
+        # coordinator 데이터 가져오기
+        stations = []
+        coordinator = self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id)
+        if coordinator and coordinator.data:
+            stations = coordinator.data
+
+        # 검색어 필터링
+        if self._fav_search:
+            stations = [s for s in stations if self._fav_search in s.get("OS_NM", "").lower()]
+
+        # 가격순 정렬
+        stations = sorted(stations, key=lambda s: int(s.get("PRICE", 999999)))
+
+        # multi-select 옵션 구성 (value=UNI_ID, label=이름+가격)
+        fav_options = []
+        for s in stations:
+            uni_id = s.get("UNI_ID", "")
+            if not uni_id:
+                continue
+            label = f"{s['OS_NM']}: {int(s['PRICE']):,}원"
+            fav_options.append({"value": uni_id, "label": label})
+
+        current_favs = self.config_entry.options.get(CONF_FAVORITES, [])
+
+        fav_selector = selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                options=fav_options,
+                multiple=True,
+                mode=selector.SelectSelectorMode.DROPDOWN,
+            )
+        )
+
+        return self.async_show_form(
+            step_id="favorites_select",
+            data_schema=vol.Schema({
+                vol.Optional(
+                    CONF_FAVORITES,
+                    default=current_favs
+                ): fav_selector,
+            }),
+        )

@@ -22,6 +22,7 @@ from .const import (
     CONF_MAX_DISTANCE,
     CONF_TMAP_KEY,
     CONF_SORT_ORDER,
+    CONF_FAVORITES,
     PROD_CODES,
 )
 
@@ -90,7 +91,15 @@ async def async_setup_entry(hass, entry, async_add_entities):
     for i in range(10):
         sensors.append(OpinetStationSensor(coordinator, entry, i, location_entity, show_distance))
     
+    # 즐겨찾기 센서
+    favorites = entry.options.get(CONF_FAVORITES, [])
+    for i, uni_id in enumerate(favorites):
+        sensors.append(OpinetStationSensor(coordinator, entry, i, location_entity, show_distance, uni_id=uni_id))
+    
     async_add_entities(sensors)
+    
+    # store coordinator for OptionsFlow access
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
 
 class KatecConverter:
     def __init__(self):
@@ -405,12 +414,16 @@ class OpinetDataUpdateCoordinator(DataUpdateCoordinator):
             raise UpdateFailed(f"Error communicating with API: {e}")
 
 class OpinetStationSensor(CoordinatorEntity, SensorEntity):
-    def __init__(self, coordinator, entry, index, location_entity, show_distance=True):
+    def __init__(self, coordinator, entry, index, location_entity, show_distance=True, uni_id=None):
         super().__init__(coordinator)
         self._index = index
+        self._uni_id = uni_id
         self._location_entity = location_entity
         self._show_distance = show_distance
-        self._attr_unique_id = f"opinet_price_{self._location_entity or 'home'}_{index + 1}"
+        if uni_id:
+            self._attr_unique_id = f"opinet_price_{self._location_entity or 'home'}_fav_{uni_id}"
+        else:
+            self._attr_unique_id = f"opinet_price_{self._location_entity or 'home'}_{index + 1}"
         self._attr_icon = "mdi:gas-station"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry.entry_id)},
@@ -421,13 +434,28 @@ class OpinetStationSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def name(self):
+        if self._uni_id:
+            return f"즐겨찾기 {self._index + 1}"
         return f"{self._index + 1}위"
+
+    def _get_station(self):
+        """Return the station dict or None. Supports both index and uni_id lookup."""
+        stations = self.coordinator.data
+        if not stations:
+            return None
+        if self._uni_id:
+            for s in stations:
+                if s.get("UNI_ID") == self._uni_id:
+                    return s
+            return None
+        if len(stations) > self._index:
+            return stations[self._index]
+        return None
 
     @property
     def state(self):
-        stations = self.coordinator.data
-        if stations and len(stations) > self._index:
-            s = stations[self._index]
+        s = self._get_station()
+        if s:
             base = f"{s['OS_NM']}:\n{int(s['PRICE']):,}원"
             if self._show_distance:
                 # Tmap 주행거리 우선, 없으면 Opinet 직선거리
@@ -442,9 +470,8 @@ class OpinetStationSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def extra_state_attributes(self):
-        stations = self.coordinator.data
-        if stations and len(stations) > self._index:
-            s = stations[self._index]
+        s = self._get_station()
+        if s:
             # 주소: Tmap 역지오코딩 우선
             full_addr = s.get("_TMAP_ADDRESS") or s.get("VAN_ADR") or ""
             if not full_addr:
@@ -456,13 +483,15 @@ class OpinetStationSensor(CoordinatorEntity, SensorEntity):
             # 거리: Tmap 주행거리 우선
             tmap_dist = s.get("_TMAP_DISTANCE")
             dist_str = f"{float(tmap_dist)/1000:.1f} km" if tmap_dist is not None else f"{float(s.get('DISTANCE', 0))/1000:.1f} km"
-            return {
+            attrs = {
                 "주유소명": s["OS_NM"],
                 "가격": int(s["PRICE"]),
                 "주소": full_addr,
                 "간략주소": short_addr,
                 "브랜드": s["POLL_DIV_CD"],
                 "거리": dist_str,
-                "순위": self._index + 1
             }
+            if not self._uni_id:
+                attrs["순위"] = self._index + 1
+            return attrs
         return {}
