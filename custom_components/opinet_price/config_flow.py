@@ -224,6 +224,13 @@ class OpinetPriceOptionsFlowHandler(config_entries.OptionsFlow):
         if coordinator and coordinator.data:
             stations = coordinator.data
 
+        if not stations:
+            return self.async_show_form(
+                step_id="favorites_select",
+                data_schema=vol.Schema({}),
+                description_placeholder={"info": "데이터가 없습니다. 센서가 데이터를 수집한 후 다시 시도하세요."},
+            )
+
         # 검색어 필터링
         if self._fav_search:
             stations = [s for s in stations if self._fav_search in s.get("OS_NM", "").lower()]
