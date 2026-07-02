@@ -64,9 +64,10 @@ class OpinetPriceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 class OpinetPriceOptionsFlowHandler(config_entries.OptionsFlow):
 
     async def async_step_init(self, user_input=None):
-        """Single form: filters + favorites."""
+        """Step 1: filters."""
         if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
+            self._filter_data = user_input
+            return await self.async_step_favorites()
 
         brand_options = [{"value": code, "label": name} for code, name in BRAND_CODES.items()]
         brand_selector = selector.SelectSelector(
@@ -76,42 +77,22 @@ class OpinetPriceOptionsFlowHandler(config_entries.OptionsFlow):
                 mode=selector.SelectSelectorMode.DROPDOWN,
             )
         )
-
         radius_selector = selector.NumberSelector(
-            selector.NumberSelectorConfig(
-                min=0.5,
-                max=20,
-                step=0.1,
-                unit_of_measurement="km",
-                mode=selector.NumberSelectorMode.SLIDER,
-            )
+            selector.NumberSelectorConfig(min=0.5, max=20, step=0.1,
+                unit_of_measurement="km", mode=selector.NumberSelectorMode.SLIDER)
         )
-
         self_only_selector = selector.BooleanSelector()
-
         highway_selector = selector.SelectSelector(
-            selector.SelectSelectorConfig(
-                options=HIGHWAY_OPTIONS,
-                mode=selector.SelectSelectorMode.DROPDOWN,
-            )
+            selector.SelectSelectorConfig(options=HIGHWAY_OPTIONS, mode=selector.SelectSelectorMode.DROPDOWN)
         )
-
         show_distance_selector = selector.BooleanSelector()
-
         sort_selector = selector.SelectSelector(
-            selector.SelectSelectorConfig(
-                options=SORT_OPTIONS,
-                mode=selector.SelectSelectorMode.DROPDOWN,
-            )
+            selector.SelectSelectorConfig(options=SORT_OPTIONS, mode=selector.SelectSelectorMode.DROPDOWN)
         )
 
-        # --- defaults ---
         current_value = self.config_entry.options.get(
-            CONF_POLL_DIV,
-            self.config_entry.data.get(
-                CONF_POLL_DIV,
-                self.config_entry.options.get("poll_div", self.config_entry.data.get("poll_div"))
-            )
+            CONF_POLL_DIV, self.config_entry.data.get(CONF_POLL_DIV,
+                self.config_entry.options.get("poll_div", self.config_entry.data.get("poll_div")))
         )
         if isinstance(current_value, str) and current_value:
             default_brands = [b.strip() for b in current_value.split(",") if b.strip()]
@@ -120,50 +101,44 @@ class OpinetPriceOptionsFlowHandler(config_entries.OptionsFlow):
         else:
             default_brands = []
 
-        default_self_only = self.config_entry.options.get(CONF_SELF_ONLY, self.config_entry.data.get(CONF_SELF_ONLY, False))
-        default_highway = self.config_entry.options.get(CONF_HIGHWAY_FILTER, self.config_entry.data.get(CONF_HIGHWAY_FILTER, "전체"))
-        default_radius = self.config_entry.options.get(CONF_RADIUS, self.config_entry.data.get(CONF_RADIUS, 5.0))
-        if isinstance(default_radius, (int, float)) and default_radius > 100:
-            default_radius = default_radius / 1000.0
-        default_show_distance = self.config_entry.options.get(CONF_MAX_DISTANCE, self.config_entry.data.get(CONF_MAX_DISTANCE, True))
-        default_sort = self.config_entry.options.get(CONF_SORT_ORDER, self.config_entry.data.get(CONF_SORT_ORDER, "가격순"))
+        defaults = lambda key, fallback: self.config_entry.options.get(key, self.config_entry.data.get(key, fallback))
 
-        schema_dict = {
-            vol.Optional(CONF_RADIUS, default=default_radius): radius_selector,
+        return self.async_show_form(step_id="init", data_schema=vol.Schema({
+            vol.Optional(CONF_RADIUS, default=defaults(CONF_RADIUS, 5.0)): radius_selector,
             vol.Optional(CONF_POLL_DIV, default=default_brands): brand_selector,
-            vol.Optional(CONF_SELF_ONLY, default=default_self_only): self_only_selector,
-            vol.Optional(CONF_HIGHWAY_FILTER, default=default_highway): highway_selector,
-            vol.Optional(CONF_MAX_DISTANCE, default=default_show_distance): show_distance_selector,
-            vol.Optional(CONF_SORT_ORDER, default=default_sort): sort_selector,
-            vol.Optional(CONF_TMAP_KEY, default=self.config_entry.options.get(CONF_TMAP_KEY, self.config_entry.data.get(CONF_TMAP_KEY, ""))): str,
-        }
+            vol.Optional(CONF_SELF_ONLY, default=defaults(CONF_SELF_ONLY, False)): self_only_selector,
+            vol.Optional(CONF_HIGHWAY_FILTER, default=defaults(CONF_HIGHWAY_FILTER, "전체")): highway_selector,
+            vol.Optional(CONF_MAX_DISTANCE, default=defaults(CONF_MAX_DISTANCE, True)): show_distance_selector,
+            vol.Optional(CONF_SORT_ORDER, default=defaults(CONF_SORT_ORDER, "가격순")): sort_selector,
+            vol.Optional(CONF_TMAP_KEY, default=defaults(CONF_TMAP_KEY, "")): str,
+        }))
 
-        # --- 즐겨찾기 (데이터 있을 때만 표시) ---
+    async def async_step_favorites(self, user_input=None):
+        """Step 2: favorites selection."""
+        if user_input is not None:
+            data = dict(self._filter_data)
+            data[CONF_FAVORITES] = user_input.get(CONF_FAVORITES, [])
+            return self.async_create_entry(title="", data=data)
+
         stations = []
         coordinator = self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id)
         if coordinator and coordinator.data:
             stations = coordinator.data
 
-        if stations:
-            fav_options = []
-            for s in sorted(stations, key=lambda s: int(s.get("PRICE", 999999))):
-                uni_id = s.get("UNI_ID")
-                if not uni_id:
-                    continue
-                label = f"{s['OS_NM']}: {int(s['PRICE']):,}원"
-                fav_options.append({"value": uni_id, "label": label})
+        if not stations:
+            return self.async_show_form(step_id="favorites", data_schema=vol.Schema({}),
+                description_placeholder={"info": "데이터가 없습니다. 센서 데이터 수집 후 다시 시도하세요."})
 
-            default_favs = self.config_entry.options.get(CONF_FAVORITES, [])
-            fav_selector = selector.SelectSelector(
-                selector.SelectSelectorConfig(
-                    options=fav_options,
-                    multiple=True,
-                    mode=selector.SelectSelectorMode.DROPDOWN,
-                )
-            )
-            schema_dict[vol.Optional(CONF_FAVORITES, default=default_favs)] = fav_selector
+        fav_options = []
+        for s in sorted(stations, key=lambda s: int(s.get("PRICE", 999999))):
+            uni_id = s.get("UNI_ID")
+            if not uni_id:
+                continue
+            fav_options.append({"value": uni_id, "label": f"{s['OS_NM']}: {int(s['PRICE']):,}원"})
 
-        return self.async_show_form(
-            step_id="init",
-            data_schema=vol.Schema(schema_dict),
-        )
+        default_favs = self.config_entry.options.get(CONF_FAVORITES, [])
+
+        return self.async_show_form(step_id="favorites", data_schema=vol.Schema({
+            vol.Optional(CONF_FAVORITES, default=default_favs): selector.SelectSelector(
+                selector.SelectSelectorConfig(options=fav_options, multiple=True, mode=selector.SelectSelectorMode.DROPDOWN))
+        }))
