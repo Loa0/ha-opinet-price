@@ -70,10 +70,18 @@ class OpinetDeviceTracker(CoordinatorEntity, TrackerEntity):
 
     @property
     def latitude(self):
+        s = self._get_station()
+        if s:
+            lat, _ = katec_to_wgs84(s.get("GIS_X_COOR"), s.get("GIS_Y_COOR"))
+            return lat
         return self._lat
 
     @property
     def longitude(self):
+        s = self._get_station()
+        if s:
+            _, lon = katec_to_wgs84(s.get("GIS_X_COOR"), s.get("GIS_Y_COOR"))
+            return lon
         return self._lon
 
     @property
