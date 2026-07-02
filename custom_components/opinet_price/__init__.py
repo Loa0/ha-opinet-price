@@ -66,7 +66,7 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     try:
-        await hass.config_entries.async_forward_entry_setups(entry, ["sensor", "button"])
+        await hass.config_entries.async_forward_entry_setups(entry, ["sensor", "button", "device_tracker"])
         entry.async_on_unload(entry.add_update_listener(update_listener))
         return True
     except ConfigEntryNotReady as err:
@@ -83,4 +83,4 @@ async def update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    return await hass.config_entries.async_unload_platforms(entry, ["sensor", "button"])
+    return await hass.config_entries.async_unload_platforms(entry, ["sensor", "button", "device_tracker"])
