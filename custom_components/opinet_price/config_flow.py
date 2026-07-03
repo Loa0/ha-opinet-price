@@ -134,10 +134,11 @@ class OpinetPriceOptionsFlowHandler(config_entries.OptionsFlow):
             return self.async_create_entry(title="", data=user_input)
 
         opts = self.config_entry.options
+        default_dist = opts.get(CONF_REFRESH_DISTANCE, 10)
         return self.async_show_form(step_id="refresh", data_schema=vol.Schema({
             vol.Optional(CONF_REFRESH_ENABLED, default=opts.get(CONF_REFRESH_ENABLED, True)): selector.BooleanSelector(),
-            vol.Optional(CONF_REFRESH_DISTANCE, default=opts.get(CONF_REFRESH_DISTANCE, 10)): selector.NumberSelector(
-                selector.NumberSelectorConfig(min=5, max=20, step=5, unit_of_measurement="km", mode=selector.NumberSelectorMode.SLIDER)),
+            vol.Optional(CONF_REFRESH_DISTANCE, default=float(default_dist)): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=5.0, max=20.0, step=5.0, unit_of_measurement="km", mode=selector.NumberSelectorMode.SLIDER)),
         }), description_placeholder={
             "usage_info": "월 예상 사용량 (하루 200km 기준)\n"
                          "5km  → 오피넷 46회/일 (3.1%) | Tmap 27,600회/월 (92%)\n"
