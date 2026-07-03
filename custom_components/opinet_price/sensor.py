@@ -3,6 +3,8 @@ import math
 import asyncio
 import async_timeout
 import json
+import hashlib
+from urllib.parse import quote
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -29,6 +31,11 @@ _LOGGER = logging.getLogger(__name__)
 
 TMAP_ROUTE_URL = "https://apis.openapi.sk.com/tmap/routes?version=1"
 TMAP_GEO_URL = "https://apis.openapi.sk.com/tmap/geo/reversegeocoding?version=1"
+
+# ── GeoAPI 설정 ──────────────────────────────────────────────
+GEOCODE_URL = "https://geo.ychome.kozow.com"
+_geocode_cache: dict[str, tuple[float, float] | None] = {}
+# ─────────────────────────────────────────────────────────────
 
 async def async_setup_entry(hass, entry, async_add_entities):
     api_key = entry.options.get(CONF_API_KEY, entry.data.get(CONF_API_KEY))
@@ -213,6 +220,41 @@ def katec_to_wgs84(gis_x, gis_y):
     
     return math.degrees(wlat), math.degrees(wlon)
 
+
+async def _fetch_geo_coords(session, address: str, uid: str) -> tuple[float, float] | None:
+    """GeoAPI로 주소 → WGS84 좌표. 캐시 히트 시 API 호출 안 함."""
+    addr_key = address.strip()
+    if not addr_key:
+        return None
+
+    # 메모리 캐시 확인
+    if addr_key in _geocode_cache:
+        return _geocode_cache[addr_key]
+
+    url = f"{GEOCODE_URL}/geocode?address={quote(addr_key)}&uid={quote(uid)}"
+    try:
+        async with async_timeout.timeout(5):
+            async with session.get(url) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    if data.get("status") == "ok":
+                        lat, lng = float(data["lat"]), float(data["lng"])
+                        _geocode_cache[addr_key] = (lat, lng)
+                        _LOGGER.debug("GeoAPI HIT: %s → (%.6f, %.6f) cached=%s",
+                                      addr_key, lat, lng, data.get("cached"))
+                        return (lat, lng)
+                    elif data.get("status") == "rate_limited":
+                        _LOGGER.warning("GeoAPI rate limited for uid=%s (used=%s/%s)",
+                                        uid, data.get("used"), data.get("limit"))
+                else:
+                    _LOGGER.debug("GeoAPI error: HTTP %s for %s", resp.status, addr_key)
+    except Exception as e:
+        _LOGGER.debug("GeoAPI call failed for %s: %s", addr_key, e)
+
+    # 실패 시 캐시에 None 기록 → 재시도 안 함 (이번 세션 내)
+    _geocode_cache[addr_key] = None
+    return None
+
 async def _fetch_tmap_distance(session, tmap_key, start_lat, start_lon, end_lat, end_lon):
     """Tmap API로 주행거리(m) 조회"""
     headers = {
@@ -370,16 +412,35 @@ class OpinetDataUpdateCoordinator(DataUpdateCoordinator):
                             len(stations),
                         )
                     
-                    # 4. Tmap 주행거리 + 주소 조회 (키 있으면 항상)
+                    # 4. GeoAPI로 정확한 좌표 획득 (VAN_ADR → WGS84)
+                    if stations:
+                        uid = self.config_entry.entry_id
+                        geo_tasks = []
+                        for s in stations:
+                            van_adr = s.get("VAN_ADR", "")
+                            geo_tasks.append(_fetch_geo_coords(session, van_adr, uid))
+                        geo_results = await asyncio.gather(*geo_tasks, return_exceptions=True)
+                        for i, s in enumerate(stations):
+                            coords = geo_results[i]
+                            if isinstance(coords, tuple) and len(coords) == 2 and coords[0] is not None:
+                                s["_GEO_LAT"], s["_GEO_LNG"] = coords[0], coords[1]
+                            elif isinstance(coords, Exception):
+                                _LOGGER.debug("GeoAPI error for %s: %s", s.get("OS_NM"), coords)
+
+                    # 5. Tmap 주행거리 + 주소 조회 (GeoAPI 좌표 우선, 없으면 KATEC)
                     if self.tmap_key and stations:
                         _LOGGER.debug("Fetching Tmap driving distances for %d stations", len(stations))
                         dist_tasks = []
                         addr_tasks = []
                         addr_indices = []
                         for i, s in enumerate(stations):
+                            # GeoAPI 좌표 우선, 없으면 KATEC 변환
                             gis_x = s.get("GIS_X_COOR")
                             gis_y = s.get("GIS_Y_COOR")
-                            end_lat, end_lon = katec_to_wgs84(gis_x, gis_y)
+                            if "_GEO_LAT" in s and "_GEO_LNG" in s:
+                                end_lat, end_lon = s["_GEO_LAT"], s["_GEO_LNG"]
+                            else:
+                                end_lat, end_lon = katec_to_wgs84(gis_x, gis_y)
                             if end_lat is not None and end_lon is not None:
                                 dist_tasks.append(_fetch_tmap_distance(session, self.tmap_key, lat, lon, end_lat, end_lon))
                                 addr_tasks.append(_fetch_tmap_address(session, self.tmap_key, end_lat, end_lon))

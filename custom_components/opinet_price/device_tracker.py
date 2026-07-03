@@ -101,6 +101,9 @@ class OpinetDeviceTracker(CoordinatorEntity, TrackerEntity):
     def latitude(self):
         s = self._get_station()
         if s:
+            # GeoAPI 좌표 우선, 없으면 KATEC 변환
+            if "_GEO_LAT" in s and "_GEO_LNG" in s:
+                return s["_GEO_LAT"]
             lat, _ = katec_to_wgs84(s.get("GIS_X_COOR"), s.get("GIS_Y_COOR"))
             return lat
         return self._lat
@@ -109,6 +112,8 @@ class OpinetDeviceTracker(CoordinatorEntity, TrackerEntity):
     def longitude(self):
         s = self._get_station()
         if s:
+            if "_GEO_LAT" in s and "_GEO_LNG" in s:
+                return s["_GEO_LNG"]
             _, lon = katec_to_wgs84(s.get("GIS_X_COOR"), s.get("GIS_Y_COOR"))
             return lon
         return self._lon
