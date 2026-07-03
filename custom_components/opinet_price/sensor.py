@@ -238,9 +238,11 @@ async def _fetch_detail_by_id(session, api_key: str, uni_id: str) -> dict | None
                             "addr": oil.get("NEW_ADR", ""),
                             "name": oil.get("OS_NM", ""),
                         }
-                _LOGGER.debug("detailById.do failed for %s: HTTP %s", uni_id, resp.status)
+                    _LOGGER.warning("detailById.do: no OIL data for %s, response: %s", uni_id, data)
+                else:
+                    _LOGGER.warning("detailById.do failed for %s: HTTP %s", uni_id, resp.status)
     except Exception as e:
-        _LOGGER.debug("detailById.do error for %s: %s", uni_id, e)
+        _LOGGER.warning("detailById.do error for %s: %s", uni_id, e)
     return None
 
 
@@ -259,11 +261,13 @@ async def _fetch_station_coords(session, api_key: str, uid: str, vworld_key: str
                                       uni_id, data.get("addr", ""), data["lat"], data["lng"])
                         return (data, False)
     except Exception as e:
-        _LOGGER.debug("Station cache lookup failed for %s: %s", uni_id, e)
+        _LOGGER.warning("Station cache lookup failed for %s: %s", uni_id, e)
 
     # 2. MISS → detailById.do → 도로명주소
+    _LOGGER.warning("Station %s: cache MISS, calling detailById.do", uni_id)
     detail = await _fetch_detail_by_id(session, api_key, uni_id)
     if not detail or not detail["addr"]:
+        _LOGGER.warning("Station %s: detailById.do failed or no addr", uni_id)
         return (None, True)
 
     addr = detail["addr"]
