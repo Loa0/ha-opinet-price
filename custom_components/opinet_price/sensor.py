@@ -227,9 +227,10 @@ def katec_to_wgs84(gis_x, gis_y):
 async def _fetch_detail_by_id(session, api_key: str, uni_id: str) -> dict | None:
     """detailById.do → NEW_ADR(도로명주소) 반환"""
     url = f"{OPINET_DETAIL_URL}?code={api_key}&id={uni_id}&out=json"
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
     try:
         async with async_timeout.timeout(10):
-            async with session.get(url) as resp:
+            async with session.get(url, headers=headers) as resp:
                 if resp.status == 200:
                     data = await resp.json()
                     oil = (data.get("RESULT", {}) or {}).get("OIL")
