@@ -17,6 +17,8 @@ from .const import (
     CONF_TMAP_KEY,
     CONF_SORT_ORDER,
     CONF_FAVORITES,
+    CONF_REFRESH_DISTANCE,
+    CONF_REFRESH_ENABLED,
     PROD_CODES,
     BRAND_CODES,
     HIGHWAY_OPTIONS,
@@ -56,7 +58,7 @@ class OpinetPriceOptionsFlowHandler(config_entries.OptionsFlow):
     async def async_step_init(self, user_input=None):
         return self.async_show_menu(
             step_id="init",
-            menu_options={"api": "API 키", "filters": "필터 설정", "favorites": "즐겨찾기 관리"},
+            menu_options={"api": "API 키", "filters": "필터 설정", "favorites": "즐겨찾기 관리", "refresh": "갱신 설정"},
         )
 
     async def async_step_api(self, user_input=None):
@@ -124,3 +126,23 @@ class OpinetPriceOptionsFlowHandler(config_entries.OptionsFlow):
             vol.Optional(CONF_FAVORITES, default=self.config_entry.options.get(CONF_FAVORITES, [])): selector.SelectSelector(
                 selector.SelectSelectorConfig(options=fav_options, multiple=True, mode=selector.SelectSelectorMode.DROPDOWN))
         }))
+
+    async def async_step_refresh(self, user_input=None):
+        if user_input is not None:
+            user_input.update({k: v for k, v in self.config_entry.options.items()
+                              if k not in user_input})
+            return self.async_create_entry(title="", data=user_input)
+
+        opts = self.config_entry.options
+        return self.async_show_form(step_id="refresh", data_schema=vol.Schema({
+            vol.Optional(CONF_REFRESH_ENABLED, default=opts.get(CONF_REFRESH_ENABLED, True)): selector.BooleanSelector(),
+            vol.Optional(CONF_REFRESH_DISTANCE, default=opts.get(CONF_REFRESH_DISTANCE, 10)): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=5, max=20, step=5, unit_of_measurement="km", mode=selector.NumberSelectorMode.SLIDER)),
+        }), description_placeholder={
+            "usage_info": "월 예상 사용량 (하루 200km 기준)\n"
+                         "5km  → 오피넷 46회/일 (3.1%) | Tmap 27,600회/월 (92%)\n"
+                         "10km → 오피넷 26회/일 (1.7%) | Tmap 15,600회/월 (52%)\n"
+                         "15km → 오피넷 18회/일 (1.2%) | Tmap 10,400회/월 (35%)\n"
+                         "20km → 오피넷 14회/일 (0.9%) | Tmap 7,800회/월 (26%)\n\n"
+                         "오피넷 일 1,500회 | Tmap 월 30,000회"
+        })

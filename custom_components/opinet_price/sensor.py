@@ -3,7 +3,6 @@ import math
 import asyncio
 import async_timeout
 import json
-from datetime import timedelta
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -97,6 +96,9 @@ async def async_setup_entry(hass, entry, async_add_entities):
         sensors.append(OpinetStationSensor(coordinator, entry, i, location_entity, show_distance, uni_id=uni_id))
     
     async_add_entities(sensors)
+    
+    # API 사용량 센서
+    async_add_entities([OpinetApiUsageSensor(coordinator, entry)])
     
     # store coordinator for OptionsFlow access
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
@@ -266,7 +268,6 @@ class OpinetDataUpdateCoordinator(DataUpdateCoordinator):
             hass,
             _LOGGER,
             name=DOMAIN,
-            update_interval=timedelta(hours=3),
         )
         self.config_entry = entry
         self.api_key = api_key
@@ -279,6 +280,8 @@ class OpinetDataUpdateCoordinator(DataUpdateCoordinator):
         self.tmap_key = tmap_key
         self.sort_order = sort_order
         self.converter = KatecConverter()
+        self.opinet_call_count = 0
+        self.tmap_call_count = 0
 
     async def _async_update_data(self):
         lat, lon = self.hass.config.latitude, self.hass.config.longitude
@@ -316,6 +319,7 @@ class OpinetDataUpdateCoordinator(DataUpdateCoordinator):
                     
                     body = (await response.text()).strip()
                     res = json.loads(body)
+                    self.opinet_call_count += 1
                     
                     result_data = res.get("RESULT", {})
                     stations = []
@@ -385,6 +389,7 @@ class OpinetDataUpdateCoordinator(DataUpdateCoordinator):
                         
                         tmap_distances = await asyncio.gather(*dist_tasks, return_exceptions=True)
                         tmap_addresses = await asyncio.gather(*addr_tasks, return_exceptions=True) if addr_tasks else []
+                        self.tmap_call_count += len(addr_indices)
                         
                         for i, s in enumerate(stations):
                             dist = tmap_distances[i]
@@ -495,3 +500,29 @@ class OpinetStationSensor(CoordinatorEntity, SensorEntity):
                 attrs["순위"] = self._index + 1
             return attrs
         return {}
+
+class OpinetApiUsageSensor(CoordinatorEntity, SensorEntity):
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator)
+        self._attr_unique_id = f"opinet_price_api_usage_{entry.entry_id}"
+        self._attr_name = "API 사용량"
+        self._attr_icon = "mdi:counter"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, entry.entry_id)},
+            name="오피넷 주유소",
+            manufacturer="Opinet",
+            model="주유소 가격 비교",
+        )
+
+    @property
+    def state(self):
+        return f"오피넷 {self.coordinator.opinet_call_count}회 | Tmap {self.coordinator.tmap_call_count}회"
+
+    @property
+    def extra_state_attributes(self):
+        return {
+            "오피넷_사용": self.coordinator.opinet_call_count,
+            "오피넷_제한": 1500,
+            "Tmap_사용": self.coordinator.tmap_call_count,
+            "Tmap_제한": 30000,
+        }

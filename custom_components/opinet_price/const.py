@@ -10,6 +10,8 @@ CONF_MAX_DISTANCE = "거리 표시"
 CONF_TMAP_KEY = "tmap_api_key"
 CONF_SORT_ORDER = "정렬 순서"
 CONF_FAVORITES = "즐겨찾기"
+CONF_REFRESH_DISTANCE = "갱신 이동거리"
+CONF_REFRESH_ENABLED = "이동 갱신"
 
 HIGHWAY_OPTIONS = ["전체", "고속도로만", "고속도로 제외"]
 SORT_OPTIONS = ["가격순", "주행거리순"]
