@@ -232,7 +232,8 @@ async def _fetch_detail_by_id(session, api_key: str, uni_id: str) -> dict | None
         async with async_timeout.timeout(10):
             async with session.get(url, headers=headers) as resp:
                 if resp.status == 200:
-                    data = await resp.json()
+                    text = await resp.text()
+                    data = json.loads(text)
                     oil = (data.get("RESULT", {}) or {}).get("OIL")
                     if oil:
                         return {

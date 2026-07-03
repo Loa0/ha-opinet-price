@@ -4,7 +4,7 @@
   "documentation": "https://www.opinet.co.kr",
   "dependencies": [],
   "codeowners": [],
-  "version": "1.9.2",
+  "version": "1.9.3",
   "iot_class": "cloud_polling",
   "config_flow": true
 }
