@@ -19,6 +19,7 @@ from .const import (
     CONF_FAVORITES,
     CONF_REFRESH_DISTANCE,
     CONF_REFRESH_ENABLED,
+    CONF_VWORLD_KEY,
     PROD_CODES,
     BRAND_CODES,
     HIGHWAY_OPTIONS,
@@ -43,6 +44,7 @@ class OpinetPriceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             vol.Required(CONF_API_KEY): str,
             vol.Required(CONF_SORT_ORDER, default="가격순"): sort_selector,
             vol.Optional(CONF_TMAP_KEY, default=""): str,
+            vol.Optional(CONF_VWORLD_KEY, default="", description="일 50회 제한 해제"): str,
             vol.Optional(CONF_PRODCD, default="B027"): vol.In(PROD_CODES),
             vol.Optional(CONF_LOCATION_ENTITY): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain=["device_tracker", "person"])),
@@ -71,6 +73,7 @@ class OpinetPriceOptionsFlowHandler(config_entries.OptionsFlow):
         return self.async_show_form(step_id="api", data_schema=vol.Schema({
             vol.Required(CONF_API_KEY, default=self.config_entry.options.get(CONF_API_KEY, self.config_entry.data.get(CONF_API_KEY, ""))): str,
             vol.Optional(CONF_TMAP_KEY, default=self.config_entry.options.get(CONF_TMAP_KEY, self.config_entry.data.get(CONF_TMAP_KEY, ""))): str,
+            vol.Optional(CONF_VWORLD_KEY, default=self.config_entry.options.get(CONF_VWORLD_KEY, self.config_entry.data.get(CONF_VWORLD_KEY, "")), description="미입력 시 일 50회 제한"): str,
         }))
 
     async def async_step_filters(self, user_input=None):

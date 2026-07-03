@@ -22,6 +22,7 @@ from .const import (
     CONF_SORT_ORDER,
     CONF_REFRESH_DISTANCE,
     CONF_REFRESH_ENABLED,
+    CONF_VWORLD_KEY,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -68,6 +69,12 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         updated = True
     if CONF_TMAP_KEY not in options:
         options[CONF_TMAP_KEY] = ""
+        updated = True
+    if CONF_VWORLD_KEY not in data:
+        data[CONF_VWORLD_KEY] = ""
+        updated = True
+    if CONF_VWORLD_KEY not in options:
+        options[CONF_VWORLD_KEY] = ""
         updated = True
 
     if updated:

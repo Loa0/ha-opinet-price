@@ -24,6 +24,7 @@ from .const import (
     CONF_TMAP_KEY,
     CONF_SORT_ORDER,
     CONF_FAVORITES,
+    CONF_VWORLD_KEY,
     PROD_CODES,
 )
 
@@ -66,6 +67,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
     show_distance = bool(show_distance)
     tmap_key = entry.options.get(CONF_TMAP_KEY, entry.data.get(CONF_TMAP_KEY, ""))
     sort_order = entry.options.get(CONF_SORT_ORDER, entry.data.get(CONF_SORT_ORDER, "가격순"))
+    vworld_key = entry.options.get(CONF_VWORLD_KEY, entry.data.get(CONF_VWORLD_KEY, ""))
     
     _LOGGER.debug(
         "Setting up Opinet Price entry. options: %s, data: %s, poll_div: %s, self_only: %s, highway_filter: %s, sort: %s",
@@ -89,6 +91,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         highway_filter,
         tmap_key,
         sort_order,
+        vworld_key,
     )
     await coordinator.async_config_entry_first_refresh()
 
@@ -221,7 +224,7 @@ def katec_to_wgs84(gis_x, gis_y):
     return math.degrees(wlat), math.degrees(wlon)
 
 
-async def _fetch_geo_coords(session, address: str, uid: str) -> tuple[float, float] | None:
+async def _fetch_geo_coords(session, address: str, uid: str, api_key: str = "") -> tuple[float, float] | None:
     """GeoAPI로 주소 → WGS84 좌표. 캐시 히트 시 API 호출 안 함."""
     addr_key = address.strip()
     if not addr_key:
@@ -231,7 +234,10 @@ async def _fetch_geo_coords(session, address: str, uid: str) -> tuple[float, flo
     if addr_key in _geocode_cache:
         return _geocode_cache[addr_key]
 
-    url = f"{GEOCODE_URL}/geocode?address={quote(addr_key)}&uid={quote(uid)}"
+    params = f"address={quote(addr_key)}&uid={quote(uid)}"
+    if api_key:
+        params += f"&api_key={quote(api_key)}"
+    url = f"{GEOCODE_URL}/geocode?{params}"
     try:
         async with async_timeout.timeout(5):
             async with session.get(url) as resp:
@@ -305,7 +311,7 @@ async def _fetch_tmap_address(session, tmap_key, lat, lon):
     return "", ""
 
 class OpinetDataUpdateCoordinator(DataUpdateCoordinator):
-    def __init__(self, hass, entry, api_key, radius, prodcd, location_entity, poll_div=None, self_only=False, highway_filter="전체", tmap_key="", sort_order="가격순"):
+    def __init__(self, hass, entry, api_key, radius, prodcd, location_entity, poll_div=None, self_only=False, highway_filter="전체", tmap_key="", sort_order="가격순", vworld_key=""):
         super().__init__(
             hass,
             _LOGGER,
@@ -321,6 +327,7 @@ class OpinetDataUpdateCoordinator(DataUpdateCoordinator):
         self.highway_filter = highway_filter
         self.tmap_key = tmap_key
         self.sort_order = sort_order
+        self.vworld_key = vworld_key
         self.converter = KatecConverter()
         self.opinet_call_count = 0
         self.tmap_call_count = 0
@@ -415,10 +422,11 @@ class OpinetDataUpdateCoordinator(DataUpdateCoordinator):
                     # 4. GeoAPI로 정확한 좌표 획득 (VAN_ADR → WGS84)
                     if stations:
                         uid = self.config_entry.entry_id
+                        vw_key = self.vworld_key.strip() if self.vworld_key else ""
                         geo_tasks = []
                         for s in stations:
                             van_adr = s.get("VAN_ADR", "")
-                            geo_tasks.append(_fetch_geo_coords(session, van_adr, uid))
+                            geo_tasks.append(_fetch_geo_coords(session, van_adr, uid, vw_key))
                         geo_results = await asyncio.gather(*geo_tasks, return_exceptions=True)
                         for i, s in enumerate(stations):
                             coords = geo_results[i]
