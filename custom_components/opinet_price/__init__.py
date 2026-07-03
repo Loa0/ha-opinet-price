@@ -88,7 +88,9 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     try:
-        await hass.config_entries.async_forward_entry_setups(entry, ["sensor", "button", "device_tracker"])
+        # sensor 먼저 로드 → coordinator 생성 후 button/device_tracker 로드
+        await hass.config_entries.async_forward_entry_setups(entry, ["sensor"])
+        await hass.config_entries.async_forward_entry_setups(entry, ["button", "device_tracker"])
 
         coordinator = hass.data[DOMAIN][entry.entry_id]
 
