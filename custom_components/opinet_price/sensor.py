@@ -234,8 +234,9 @@ async def _fetch_detail_by_id(session, api_key: str, uni_id: str) -> dict | None
                 if resp.status == 200:
                     text = await resp.text()
                     data = json.loads(text)
-                    oil = (data.get("RESULT", {}) or {}).get("OIL")
-                    if oil:
+                    result = data.get("RESULT", {}) or {}
+                    oil = (result.get("OIL") or [None])[0] if isinstance(result, dict) else None
+                    if isinstance(oil, dict):
                         return {
                             "addr": oil.get("NEW_ADR", ""),
                             "name": oil.get("OS_NM", ""),
