@@ -140,10 +140,10 @@ class OpinetPriceOptionsFlowHandler(config_entries.OptionsFlow):
             vol.Optional(CONF_REFRESH_DISTANCE, default=float(default_dist)): selector.NumberSelector(
                 selector.NumberSelectorConfig(min=5.0, max=20.0, step=5.0, unit_of_measurement="km", mode=selector.NumberSelectorMode.SLIDER)),
         }), description_placeholder={
-            "usage_info": "월 예상 사용량 (하루 200km 기준)\n"
-                         "5km  → 오피넷 46회/일 (3.1%) | Tmap 27,600회/월 (92%)\n"
-                         "10km → 오피넷 26회/일 (1.7%) | Tmap 15,600회/월 (52%)\n"
-                         "15km → 오피넷 18회/일 (1.2%) | Tmap 10,400회/월 (35%)\n"
-                         "20km → 오피넷 14회/일 (0.9%) | Tmap 7,800회/월 (26%)\n\n"
-                         "오피넷 일 1,500회 | Tmap 월 30,000회"
+            "info": "월 예상 사용량 (하루 200km 기준)\n"
+                   "5km  → 오피넷 46회/일 (3.1%) | Tmap 27,600회/월 (92%)\n"
+                   "10km → 오피넷 26회/일 (1.7%) | Tmap 15,600회/월 (52%)\n"
+                   "15km → 오피넷 18회/일 (1.2%) | Tmap 10,400회/월 (35%)\n"
+                   "20km → 오피넷 14회/일 (0.9%) | Tmap 7,800회/월 (26%)\n\n"
+                   "오피넷 일 1,500회 | Tmap 월 30,000회"
         })
