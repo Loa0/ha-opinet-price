@@ -426,6 +426,9 @@ class OpinetDataUpdateCoordinator(DataUpdateCoordinator):
                         geo_tasks = []
                         for s in stations:
                             van_adr = s.get("VAN_ADR", "")
+                            # VAN_ADR 정제: "시군구,시군구 법정동 지번" → 뒷부분만 사용
+                            if "," in van_adr:
+                                van_adr = van_adr.split(",", 1)[1].strip()
                             geo_tasks.append(_fetch_geo_coords(session, van_adr, uid, vw_key))
                         geo_results = await asyncio.gather(*geo_tasks, return_exceptions=True)
                         for i, s in enumerate(stations):
