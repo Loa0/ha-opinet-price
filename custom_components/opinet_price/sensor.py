@@ -607,7 +607,7 @@ class OpinetDataUpdateCoordinator(DataUpdateCoordinator):
                         stations.sort(key=lambda x: float(x.get("_TMAP_DISTANCE", 1e9)))
                         _LOGGER.debug("Sorted stations by Tmap driving distance")
                     elif stations:
-                        stations.sort(key=lambda x: int(x["PRICE"]))
+                        stations.sort(key=lambda x: int(x.get("PRICE", 99999)))
                     
                     return stations
         except Exception as e:
@@ -657,7 +657,7 @@ class OpinetStationSensor(CoordinatorEntity, SensorEntity):
     def state(self):
         s = self._get_station()
         if s:
-            base = f"{s['OS_NM']}:\n{int(s['PRICE']):,}원"
+            base = f"{s['OS_NM']}:\n{int(s.get('PRICE', 0)):,}원"
             if self._show_distance:
                 tmap_dist = s.get("_TMAP_DISTANCE")
                 if tmap_dist is not None:
@@ -693,7 +693,7 @@ class OpinetStationSensor(CoordinatorEntity, SensorEntity):
                 dist_str = f"{float(s.get('DISTANCE', 0))/1000:.1f} km"
             attrs = {
                 "주유소명": s["OS_NM"],
-                "가격": int(s["PRICE"]),
+                "가격": int(s.get("PRICE", 0)),
                 "주소": full_addr,
                 "간략주소": short_addr,
                 "브랜드": s["POLL_DIV_CD"],

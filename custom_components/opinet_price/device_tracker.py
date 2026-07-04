@@ -92,8 +92,8 @@ class OpinetDeviceTracker(CoordinatorEntity, TrackerEntity):
             dist_str = f"{float(s.get('DISTANCE', 0)) / 1000:.1f} km"
         attrs = {
             "상호명": s["OS_NM"],
-            "가격": int(s["PRICE"]),
-            "가격표시": f"{int(s['PRICE']):,}원",
+            "가격": int(s.get("PRICE", 0)),
+            "가격표시": f"{int(s.get('PRICE', 0)):,}원",
             "주소": s.get("_GEO_ADDR") or s.get("_TMAP_ADDRESS") or s.get("VAN_ADR", ""),
             "브랜드": s["POLL_DIV_CD"],
             "거리": dist_str,
