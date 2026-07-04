@@ -497,8 +497,10 @@ class OpinetDataUpdateCoordinator(DataUpdateCoordinator):
                     if favs:
                         existing_ids = {s.get("UNI_ID") for s in stations}
                         missing_favs = [f for f in favs if f not in existing_ids]
+                        _LOGGER.warning("Fav fallback: total=%d in_around=%d missing=%d",
+                                       len(favs), len(existing_ids), len(missing_favs))
                         if missing_favs:
-                            _LOGGER.debug("Fetching %d missing favorites via detailById.do", len(missing_favs))
+                            _LOGGER.warning("Fetching %d missing favorites via detailById.do: %s", len(missing_favs), missing_favs)
                             fav_tasks = [_fetch_detail_by_id_full(session, self.api_key, uid) for uid in missing_favs]
                             fav_results = await asyncio.gather(*fav_tasks, return_exceptions=True)
                             fav_stations = []
@@ -508,11 +510,13 @@ class OpinetDataUpdateCoordinator(DataUpdateCoordinator):
                                     r["_IS_FAV_ONLY"] = True
                                     fav_stations.append(r)
                                     self.opinet_call_count += 1
-                                    # detailById로 얻은 주소로 GeoAPI 좌표 조회 (known_addr 전달)
                                     addr = r.get("NEW_ADR") or r.get("VAN_ADR", "")
                                     fav_geo_addrs.append(addr if addr else None)
+                                    _LOGGER.warning("detailById OK: %s (%s) price=%s", r.get("OS_NM"), r.get("UNI_ID"), r.get("PRICE", "?"))
                                 elif isinstance(r, Exception):
-                                    _LOGGER.debug("detailById.do error for fav %s: %s", missing_favs[i], r)
+                                    _LOGGER.warning("detailById.do error for fav %s: %s", missing_favs[i], r)
+                                else:
+                                    _LOGGER.warning("detailById.do returned None for fav %s", missing_favs[i])
                             # GeoAPI 좌표 조회: known_addr 제공 → detailById 중복 호출 방지
                             if fav_stations:
                                 uid = self.config_entry.entry_id
