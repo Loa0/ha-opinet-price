@@ -95,7 +95,7 @@ class OpinetDeviceTracker(CoordinatorEntity, TrackerEntity):
             "가격": int(s.get("PRICE", 0)),
             "가격표시": f"{int(s.get('PRICE', 0)):,}원",
             "주소": s.get("_GEO_ADDR") or s.get("_TMAP_ADDRESS") or s.get("VAN_ADR", ""),
-            "브랜드": s["POLL_DIV_CD"],
+            "브랜드": s.get("POLL_DIV_CD", ""),
             "거리": dist_str,
         }
         if not self._uni_id:

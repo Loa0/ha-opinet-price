@@ -708,7 +708,7 @@ class OpinetStationSensor(CoordinatorEntity, SensorEntity):
                 "가격": int(s.get("PRICE", 0)),
                 "주소": full_addr,
                 "간략주소": short_addr,
-                "브랜드": s["POLL_DIV_CD"],
+                "브랜드": s.get("POLL_DIV_CD", ""),
                 "거리": dist_str,
             }
             if not self._uni_id:
