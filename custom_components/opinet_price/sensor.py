@@ -333,6 +333,14 @@ async def _fetch_station_coords(session, api_key: str, uid: str, vworld_key: str
 
     return (None, detail_called, False)
 
+
+def _get_price(s: dict) -> int:
+    """detailById(OIL_PRICE) / aroundAll(PRICE) 호환 가격 추출"""
+    try:
+        return int(s.get("PRICE") or s.get("OIL_PRICE") or 0)
+    except (ValueError, TypeError):
+        return 0
+
 async def _fetch_tmap_distance(session, tmap_key, start_lat, start_lon, end_lat, end_lon):
     """Tmap API로 주행거리(m) 조회"""
     headers = {
@@ -512,7 +520,7 @@ class OpinetDataUpdateCoordinator(DataUpdateCoordinator):
                                     self.opinet_call_count += 1
                                     addr = r.get("NEW_ADR") or r.get("VAN_ADR", "")
                                     fav_geo_addrs.append(addr if addr else None)
-                                    _LOGGER.warning("detailById OK: %s (%s) price=%s", r.get("OS_NM"), r.get("UNI_ID"), r.get("PRICE", "?"))
+                                    _LOGGER.warning("detailById OK: %s (%s) price=%s", r.get("OS_NM"), r.get("UNI_ID"), r.get("PRICE") or r.get("OIL_PRICE") or "?")
                                 elif isinstance(r, Exception):
                                     _LOGGER.warning("detailById.do error for fav %s: %s", missing_favs[i], r)
                                 else:
@@ -615,7 +623,7 @@ class OpinetDataUpdateCoordinator(DataUpdateCoordinator):
                         stations.sort(key=lambda x: float(x.get("_TMAP_DISTANCE", 1e9)))
                         _LOGGER.debug("Sorted stations by Tmap driving distance")
                     elif stations:
-                        stations.sort(key=lambda x: int(x.get("PRICE", 99999)))
+                        stations.sort(key=lambda x: _get_price(x))
                     
                     return stations
         except Exception as e:
@@ -669,7 +677,7 @@ class OpinetStationSensor(CoordinatorEntity, SensorEntity):
     def state(self):
         s = self._get_station()
         if s:
-            base = f"{s['OS_NM']}:\n{int(s.get('PRICE', 0)):,}원"
+            base = f"{s['OS_NM']}:\n{_get_price(s):,}원"
             if self._show_distance:
                 tmap_dist = s.get("_TMAP_DISTANCE")
                 if tmap_dist is not None:
@@ -705,7 +713,7 @@ class OpinetStationSensor(CoordinatorEntity, SensorEntity):
                 dist_str = f"{float(s.get('DISTANCE', 0))/1000:.1f} km"
             attrs = {
                 "주유소명": s["OS_NM"],
-                "가격": int(s.get("PRICE", 0)),
+                "가격": _get_price(s),
                 "주소": full_addr,
                 "간략주소": short_addr,
                 "브랜드": s.get("POLL_DIV_CD", ""),

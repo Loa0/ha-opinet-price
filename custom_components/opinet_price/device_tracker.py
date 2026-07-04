@@ -7,7 +7,7 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, CONF_FAVORITES
-from .sensor import katec_to_wgs84
+from .sensor import katec_to_wgs84, _get_price
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -92,8 +92,8 @@ class OpinetDeviceTracker(CoordinatorEntity, TrackerEntity):
             dist_str = f"{float(s.get('DISTANCE', 0)) / 1000:.1f} km"
         attrs = {
             "상호명": s["OS_NM"],
-            "가격": int(s.get("PRICE", 0)),
-            "가격표시": f"{int(s.get('PRICE', 0)):,}원",
+            "가격": _get_price(s),
+            "가격표시": f"{_get_price(s):,}원",
             "주소": s.get("_GEO_ADDR") or s.get("_TMAP_ADDRESS") or s.get("VAN_ADR", ""),
             "브랜드": s.get("POLL_DIV_CD", ""),
             "거리": dist_str,
