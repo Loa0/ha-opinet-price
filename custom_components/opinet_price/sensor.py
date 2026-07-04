@@ -249,8 +249,8 @@ async def _fetch_detail_by_id(session, api_key: str, uni_id: str) -> dict | None
     return None
 
 
-async def _fetch_station_coords(session, api_key: str, uid: str, vworld_key: str, uni_id: str) -> tuple[dict | None, bool]:
-    """UNI_ID → ({addr, lat, lng}, detail_called).
+async def _fetch_station_coords(session, api_key: str, uid: str, vworld_key: str, uni_id: str) -> tuple[dict | None, bool, bool]:
+    """UNI_ID → (result, detail_called, vworld_called).
     GeoAPI /station/{uni_id}(Redis) 우선, MISS → detailById + /geocode"""
     # 1. GeoAPI /station/{uni_id} → Redis 캐시 조회
     station_url = f"{GEOCODE_URL}/station/{quote(uni_id, safe='')}"
@@ -260,9 +260,7 @@ async def _fetch_station_coords(session, api_key: str, uid: str, vworld_key: str
                 if resp.status == 200:
                     data = await resp.json()
                     if data.get("lat") is not None and data.get("lng") is not None:
-                        _LOGGER.debug("Station %s: cache HIT → %s (%.6f, %.6f)",
-                                      uni_id, data.get("addr", ""), data["lat"], data["lng"])
-                        return (data, False)
+                        return (data, False, False)
     except Exception as e:
         _LOGGER.warning("Station cache lookup failed for %s: %s", uni_id, e)
 
@@ -271,11 +269,11 @@ async def _fetch_station_coords(session, api_key: str, uid: str, vworld_key: str
     detail = await _fetch_detail_by_id(session, api_key, uni_id)
     if not detail or not detail["addr"]:
         _LOGGER.warning("Station %s: detailById.do failed or no addr", uni_id)
-        return (None, True)
+        return (None, True, False)
 
     addr = detail["addr"]
 
-    # 3. GeoAPI /geocode → VWorld (GeoAPI가 Redis에 station:{uni_id} 저장)
+    # 3. GeoAPI /geocode → VWorld
     params = f"address={quote(addr)}&uid={quote(uid)}&uni_id={quote(uni_id, safe='')}"
     if vworld_key:
         params += f"&api_key={quote(vworld_key)}"
@@ -287,9 +285,8 @@ async def _fetch_station_coords(session, api_key: str, uid: str, vworld_key: str
                     data = await resp.json()
                     if data.get("status") == "ok":
                         result = {"addr": addr, "lat": float(data["lat"]), "lng": float(data["lng"])}
-                        _LOGGER.debug("Station %s: %s → (%.6f, %.6f) [cached=%s]",
-                                      uni_id, addr, result["lat"], result["lng"], data.get("cached"))
-                        return (result, True)
+                        vworld_called = not data.get("cached", True)  # cached=false → 실제 VWorld 호출
+                        return (result, True, vworld_called)
                     elif data.get("status") == "rate_limited":
                         _LOGGER.warning("GeoAPI rate limited for uid=%s", uid)
                 else:
@@ -297,7 +294,7 @@ async def _fetch_station_coords(session, api_key: str, uid: str, vworld_key: str
     except Exception as e:
         _LOGGER.debug("GeoAPI call failed for %s: %s", uni_id, e)
 
-    return (None, True)
+    return (None, True, False)
 
 async def _fetch_tmap_distance(session, tmap_key, start_lat, start_lon, end_lat, end_lon):
     """Tmap API로 주행거리(m) 조회"""
@@ -368,6 +365,7 @@ class OpinetDataUpdateCoordinator(DataUpdateCoordinator):
         self.vworld_key = vworld_key
         self.converter = KatecConverter()
         self.opinet_call_count = 0
+        self.vworld_call_count = 0
         self.tmap_call_count = 0
 
     async def _async_update_data(self):
@@ -464,12 +462,15 @@ class OpinetDataUpdateCoordinator(DataUpdateCoordinator):
                         geo_tasks = [_fetch_station_coords(session, self.api_key, uid, vw_key, s.get("UNI_ID", "")) for s in stations]
                         geo_results = await asyncio.gather(*geo_tasks, return_exceptions=True)
                         detail_calls = 0
+                        vworld_calls = 0
                         for i, s in enumerate(stations):
                             r = geo_results[i]
-                            if isinstance(r, tuple) and len(r) == 2:
-                                coords, called = r
-                                if called:
+                            if isinstance(r, tuple) and len(r) == 3:
+                                coords, d_called, vw_called = r
+                                if d_called:
                                     detail_calls += 1
+                                if vw_called:
+                                    vworld_calls += 1
                                 if isinstance(coords, dict) and coords.get("lat") is not None:
                                     s["_GEO_LAT"] = coords["lat"]
                                     s["_GEO_LNG"] = coords["lng"]
@@ -478,6 +479,7 @@ class OpinetDataUpdateCoordinator(DataUpdateCoordinator):
                                 detail_calls += 1
                                 _LOGGER.debug("Station coord error for %s: %s", s.get("OS_NM"), r)
                         self.opinet_call_count += detail_calls
+                        self.vworld_call_count += vworld_calls
 
                     # 5. Tmap 주행거리 + 주소 조회 (GeoAPI 좌표 우선, 없으면 KATEC)
                     if self.tmap_key and stations:
@@ -629,13 +631,12 @@ class OpinetApiUsageSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def state(self):
-        return f"오피넷 {self.coordinator.opinet_call_count}회 | Tmap {self.coordinator.tmap_call_count}회"
+        return f"오피넷 {self.coordinator.opinet_call_count}회 | VWorld {self.coordinator.vworld_call_count}회 | Tmap {self.coordinator.tmap_call_count}회"
 
     @property
     def extra_state_attributes(self):
         return {
-            "오피넷_사용": self.coordinator.opinet_call_count,
-            "오피넷_제한": 1500,
-            "Tmap_사용": self.coordinator.tmap_call_count,
-            "Tmap_제한": 30000,
+            "opinet_calls": self.coordinator.opinet_call_count,
+            "vworld_calls": self.coordinator.vworld_call_count,
+            "tmap_calls": self.coordinator.tmap_call_count,
         }
