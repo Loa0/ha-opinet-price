@@ -564,15 +564,13 @@ class OpinetDataUpdateCoordinator(DataUpdateCoordinator):
                     # 5. Tmap 주행거리 + 주소 조회 (GeoAPI 좌표 우선, 없으면 KATEC)
                     # 단, 즐겨찾기 전용(_IS_FAV_ONLY) 주유소는 Tmap 스킵
                     if self.tmap_key and stations:
-                        _LOGGER.debug("Fetching Tmap driving distances for %d stations", len(stations))
                         dist_tasks = []
+                        dist_indices = []
                         addr_tasks = []
                         addr_indices = []
                         for i, s in enumerate(stations):
                             if s.get("_IS_FAV_ONLY"):
-                                dist_tasks.append(None)  # placeholder 유지 (인덱스 동기화)
                                 continue
-                            # GeoAPI 좌표 우선, 없으면 KATEC 변환
                             gis_x = s.get("GIS_X_COOR")
                             gis_y = s.get("GIS_Y_COOR")
                             if "_GEO_LAT" in s and "_GEO_LNG" in s:
@@ -581,29 +579,28 @@ class OpinetDataUpdateCoordinator(DataUpdateCoordinator):
                                 end_lat, end_lon = katec_to_wgs84(gis_x, gis_y)
                             if end_lat is not None and end_lon is not None:
                                 dist_tasks.append(_fetch_tmap_distance(session, self.tmap_key, lat, lon, end_lat, end_lon))
+                                dist_indices.append(i)
                                 addr_tasks.append(_fetch_tmap_address(session, self.tmap_key, end_lat, end_lon))
                                 addr_indices.append(i)
-                            else:
-                                dist_tasks.append(None)
-                        
-                        tmap_distances = await asyncio.gather(*dist_tasks, return_exceptions=True)
-                        tmap_addresses = await asyncio.gather(*addr_tasks, return_exceptions=True) if addr_tasks else []
-                        self.tmap_call_count += len(addr_indices)
-                        
-                        for i, s in enumerate(stations):
-                            dist = tmap_distances[i]
-                            if isinstance(dist, (int, float)):
-                                s["_TMAP_DISTANCE"] = dist
-                            elif isinstance(dist, Exception):
-                                _LOGGER.debug("Tmap distance error for %s: %s", s.get("OS_NM"), dist)
-                        
-                        for j, idx in enumerate(addr_indices):
-                            addr = tmap_addresses[j] if j < len(tmap_addresses) else ("", "")
-                            if isinstance(addr, tuple) and len(addr) == 2:
-                                stations[idx]["_TMAP_ADDRESS"] = addr[0]
-                                stations[idx]["_TMAP_SHORT_ADDR"] = addr[1]
-                            elif isinstance(addr, Exception):
-                                _LOGGER.debug("Tmap address error for %s: %s", stations[idx].get("OS_NM"), addr)
+
+                        if dist_tasks:
+                            tmap_distances = await asyncio.gather(*dist_tasks, return_exceptions=True)
+                            for j, i in enumerate(dist_indices):
+                                dist = tmap_distances[j]
+                                if isinstance(dist, (int, float)):
+                                    stations[i]["_TMAP_DISTANCE"] = dist
+                                elif isinstance(dist, Exception):
+                                    _LOGGER.debug("Tmap distance error for %s: %s", stations[i].get("OS_NM"), dist)
+                        if addr_tasks:
+                            tmap_addresses = await asyncio.gather(*addr_tasks, return_exceptions=True)
+                            self.tmap_call_count += len(addr_indices)
+                            for j, idx in enumerate(addr_indices):
+                                addr = tmap_addresses[j]
+                                if isinstance(addr, tuple) and len(addr) == 2:
+                                    stations[idx]["_TMAP_ADDRESS"] = addr[0]
+                                    stations[idx]["_TMAP_SHORT_ADDR"] = addr[1]
+                                elif isinstance(addr, Exception):
+                                    _LOGGER.debug("Tmap address error for %s: %s", stations[idx].get("OS_NM"), addr)
                     
                     # 정렬
                     if self.sort_order == "주행거리순":
