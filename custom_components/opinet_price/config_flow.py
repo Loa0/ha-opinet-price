@@ -124,11 +124,9 @@ class OpinetPriceOptionsFlowHandler(config_entries.OptionsFlow):
                     return await self._show_favorites_form(errors=errors)
                 self._search_results = results
                 return await self.async_step_favorites_select()
-            # 검색어 없으면 기존 즐겨찾기 저장
-            favorites = user_input.get(CONF_FAVORITES, [])
-            opts = dict(self.config_entry.options)
-            opts[CONF_FAVORITES] = favorites
-            return self.async_create_entry(title="", data=opts)
+            # 검색어 없으면 오류
+            errors = {"search": "상호명을 입력하세요"}
+            return await self._show_favorites_form(errors=errors)
 
         return await self._show_favorites_form()
 
@@ -138,10 +136,8 @@ class OpinetPriceOptionsFlowHandler(config_entries.OptionsFlow):
             vol.Optional("search", default=""): str,
             vol.Optional("search_area", default=""): selector.SelectSelector(
                 selector.SelectSelectorConfig(options=area_options, mode=selector.SelectSelectorMode.DROPDOWN)),
-            vol.Optional(CONF_FAVORITES, default=self.config_entry.options.get(CONF_FAVORITES, [])): selector.SelectSelector(
-                selector.SelectSelectorConfig(options=[], multiple=True, mode=selector.SelectSelectorMode.DROPDOWN)),
         }), errors=errors, description_placeholder={
-            "info": "검색어 입력 후 '제출' → 결과에서 선택"
+            "info": "상호명 입력 후 제출 → 검색 결과에서 선택"
         })
 
     async def async_step_favorites_select(self, user_input=None):
