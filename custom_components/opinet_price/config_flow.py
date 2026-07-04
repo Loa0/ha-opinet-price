@@ -133,12 +133,10 @@ class OpinetPriceOptionsFlowHandler(config_entries.OptionsFlow):
     async def _show_favorites_form(self, errors=None):
         area_options = [{"value": code, "label": name} for name, code in AREA_CODES.items()]
         return self.async_show_form(step_id="favorites", data_schema=vol.Schema({
-            vol.Optional("search", default=""): str,
+            vol.Optional("search", description="상호명 (2글자 이상)"): str,
             vol.Optional("search_area", default=""): selector.SelectSelector(
                 selector.SelectSelectorConfig(options=area_options, mode=selector.SelectSelectorMode.DROPDOWN)),
-        }), errors=errors, description_placeholder={
-            "info": "상호명 입력 후 제출 → 검색 결과에서 선택"
-        })
+        }), errors=errors)
 
     async def async_step_favorites_select(self, user_input=None):
         if user_input is not None:
@@ -152,7 +150,8 @@ class OpinetPriceOptionsFlowHandler(config_entries.OptionsFlow):
             return self.async_create_entry(title="", data=opts)
 
         fav_options = []
-        for s in self._search_results:
+        results = getattr(self, "_search_results", []) or []
+        for s in results:
             uid = s.get("UNI_ID")
             name = s.get("OS_NM", "?")
             addr = s.get("NEW_ADR") or s.get("VAN_ADR", "")
