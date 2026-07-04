@@ -36,6 +36,7 @@ TMAP_GEO_URL = "https://apis.openapi.sk.com/tmap/geo/reversegeocoding?version=1"
 # ── GeoAPI 설정 ──────────────────────────────────────────────
 GEOCODE_URL = "https://geo.ychome.kozow.com"
 OPINET_DETAIL_URL = "https://www.opinet.co.kr/api/detailById.do"
+OPINET_SEARCH_URL = "https://www.opinet.co.kr/api/searchByName.do"
 # ─────────────────────────────────────────────────────────────
 
 async def async_setup_entry(hass, entry, async_add_entities):
@@ -247,6 +248,27 @@ async def _fetch_detail_by_id(session, api_key: str, uni_id: str) -> dict | None
     except Exception as e:
         _LOGGER.warning("detailById.do error for %s: %s", uni_id, e)
     return None
+
+
+async def _fetch_search_by_name(session, api_key: str, osnm: str, area: str = "") -> list[dict]:
+    """searchByName.do → 상호 검색 → [{UNI_ID, OS_NM, NEW_ADR, ...}]"""
+    params = f"code={api_key}&osnm={quote(osnm)}&out=json"
+    if area:
+        params += f"&area={area}"
+    url = f"{OPINET_SEARCH_URL}?{params}"
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
+    try:
+        async with async_timeout.timeout(10):
+            async with session.get(url, headers=headers) as resp:
+                if resp.status == 200:
+                    text = await resp.text()
+                    data = json.loads(text)
+                    result = data.get("RESULT", {}) or {}
+                    return (result.get("OIL") or []) if isinstance(result, dict) else []
+                _LOGGER.warning("searchByName.do failed: HTTP %s", resp.status)
+    except Exception as e:
+        _LOGGER.warning("searchByName.do error: %s", e)
+    return []
 
 
 async def _fetch_station_coords(session, api_key: str, uid: str, vworld_key: str, uni_id: str) -> tuple[dict | None, bool, bool]:

@@ -24,7 +24,10 @@ from .const import (
     BRAND_CODES,
     HIGHWAY_OPTIONS,
     SORT_OPTIONS,
+    AREA_CODES,
 )
+from .sensor import _fetch_search_by_name
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 class OpinetPriceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 2
@@ -105,29 +108,63 @@ class OpinetPriceOptionsFlowHandler(config_entries.OptionsFlow):
 
     async def async_step_favorites(self, user_input=None):
         if user_input is not None:
-            user_input.update({k: v for k, v in self.config_entry.options.items()
-                              if k not in user_input})
-            return self.async_create_entry(title="", data=user_input)
+            search = user_input.get("search", "").strip()
+            if search:
+                # 검색어 2글자 이상 검증
+                if len(search) < 2:
+                    errors = {"search": "두 글자 이상 입력하세요"}
+                    return await self._show_favorites_form(errors=errors)
+                area = user_input.get("search_area", "")
+                # searchByName.do 호출
+                session = async_get_clientsession(self.hass)
+                api_key = self.config_entry.options.get(CONF_API_KEY, self.config_entry.data.get(CONF_API_KEY, ""))
+                results = await _fetch_search_by_name(session, api_key, search, area)
+                if not results:
+                    errors = {"search": "검색 결과가 없습니다"}
+                    return await self._show_favorites_form(errors=errors)
+                self._search_results = results
+                return await self.async_step_favorites_select()
+            # 검색어 없으면 기존 즐겨찾기 저장
+            favorites = user_input.get(CONF_FAVORITES, [])
+            opts = dict(self.config_entry.options)
+            opts[CONF_FAVORITES] = favorites
+            return self.async_create_entry(title="", data=opts)
 
-        stations = []
-        coordinator = self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id)
-        if coordinator and coordinator.data:
-            stations = coordinator.data
+        return await self._show_favorites_form()
 
-        if not stations:
-            return self.async_show_form(step_id="favorites", data_schema=vol.Schema({}),
-                description_placeholder={"info": "데이터가 없습니다. 센서 데이터 수집 후 다시 시도하세요."})
+    async def _show_favorites_form(self, errors=None):
+        area_options = [{"value": code, "label": name} for name, code in AREA_CODES.items()]
+        return self.async_show_form(step_id="favorites", data_schema=vol.Schema({
+            vol.Optional("search", default=""): str,
+            vol.Optional("search_area", default=""): selector.SelectSelector(
+                selector.SelectSelectorConfig(options=area_options, mode=selector.SelectSelectorMode.DROPDOWN)),
+            vol.Optional(CONF_FAVORITES, default=self.config_entry.options.get(CONF_FAVORITES, [])): selector.SelectSelector(
+                selector.SelectSelectorConfig(options=[], multiple=True, mode=selector.SelectSelectorMode.DROPDOWN)),
+        }), errors=errors, description_placeholder={
+            "info": "검색어 입력 후 '제출' → 결과에서 선택"
+        })
+
+    async def async_step_favorites_select(self, user_input=None):
+        if user_input is not None:
+            new_favs = user_input.get(CONF_FAVORITES, [])
+            existing = list(self.config_entry.options.get(CONF_FAVORITES, []))
+            for uid in new_favs:
+                if uid not in existing:
+                    existing.append(uid)
+            opts = dict(self.config_entry.options)
+            opts[CONF_FAVORITES] = existing
+            return self.async_create_entry(title="", data=opts)
 
         fav_options = []
-        for s in sorted(stations, key=lambda s: int(s.get("PRICE", 999999))):
-            uni_id = s.get("UNI_ID")
-            if not uni_id:
-                continue
-            fav_options.append({"value": uni_id, "label": f"{s['OS_NM']}: {int(s['PRICE']):,}원"})
+        for s in self._search_results:
+            uid = s.get("UNI_ID")
+            name = s.get("OS_NM", "?")
+            addr = s.get("NEW_ADR") or s.get("VAN_ADR", "")
+            fav_options.append({"value": uid, "label": f"{name} ({addr})"})
 
-        return self.async_show_form(step_id="favorites", data_schema=vol.Schema({
+        return self.async_show_form(step_id="favorites_select", data_schema=vol.Schema({
             vol.Optional(CONF_FAVORITES, default=self.config_entry.options.get(CONF_FAVORITES, [])): selector.SelectSelector(
-                selector.SelectSelectorConfig(options=fav_options, multiple=True, mode=selector.SelectSelectorMode.DROPDOWN))
+                selector.SelectSelectorConfig(options=fav_options, multiple=True, mode=selector.SelectSelectorMode.DROPDOWN)),
         }))
 
     async def async_step_refresh(self, user_input=None):
