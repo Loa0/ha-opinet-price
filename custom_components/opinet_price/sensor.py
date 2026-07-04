@@ -238,7 +238,7 @@ async def _fetch_detail_by_id(session, api_key: str, uni_id: str) -> dict | None
 
 
 async def _fetch_detail_by_id_full(session, api_key: str, uni_id: str) -> dict | None:
-    """detailById.do → 전체 주유소 데이터 반환 (aroundAll.do OIL 형식과 호환)"""
+    """detailById.do → aroundAll.do OIL 형식으로 변환 (최상위 메타데이터 + OIL 병합)"""
     url = f"{OPINET_DETAIL_URL}?code={api_key}&id={uni_id}&out=json"
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
     try:
@@ -248,10 +248,51 @@ async def _fetch_detail_by_id_full(session, api_key: str, uni_id: str) -> dict |
                     text = await resp.text()
                     data = json.loads(text)
                     result = data.get("RESULT", {}) or {}
-                    oil = (result.get("OIL") or [None])[0] if isinstance(result, dict) else None
-                    if isinstance(oil, dict):
-                        return oil
-                    _LOGGER.warning("detailById.do: no OIL data for %s, response: %s", uni_id, data)
+                    if not isinstance(result, dict):
+                        _LOGGER.warning("detailById.do: unexpected result type for %s", uni_id)
+                        return None
+
+                    # RESULT 최상위 키들을 aroundAll 호환 dict로 구성
+                    station = {
+                        k: result.get(k)
+                        for k in (
+                            "UNI_ID", "POLL_DIV_CD", "GPOLL_DIV_CD", "OS_NM",
+                            "VAN_ADR", "NEW_ADR", "TEL", "SIGUNCD",
+                            "LPG_YN", "MAINT_YN", "CAR_WASH_YN", "CVS_YN",
+                            "KPETRO_YN", "GOOD_YN", "GOOD_YN_5",
+                            "GIS_X_COOR", "GIS_Y_COOR",
+                        )
+                        if result.get(k) is not None
+                    }
+
+                    # OIL 배열 (상품별 가격) ─ 첫 번째 항목의 PRICE 사용
+                    oil_arr = result.get("OIL") or []
+                    if isinstance(oil_arr, list) and oil_arr:
+                        first_oil = oil_arr[0]
+                        if isinstance(first_oil, dict):
+                            station["PRICE"] = first_oil.get("PRICE", 0)
+                            station["PRODCD"] = first_oil.get("PRODCD", "")
+                            station["TRADE_DT"] = first_oil.get("TRADE_DT", "")
+                            station["TRADE_TM"] = first_oil.get("TRADE_TM", "")
+
+                    # OIL_PRICE 별도 필드 (일부 응답에서 사용)
+                    oil_price = result.get("OIL_PRICE")
+                    if isinstance(oil_price, list) and oil_price:
+                        first_op = oil_price[0]
+                        if isinstance(first_op, dict) and "PRICE" not in station:
+                            station["PRICE"] = first_op.get("PRICE", 0)
+
+                    # PRICE가 배열로 남아있으면 첫 번째 요소에서 추출
+                    if isinstance(station.get("PRICE"), list):
+                        plist = station["PRICE"]
+                        if plist and isinstance(plist[0], dict):
+                            station["PRICE"] = plist[0].get("PRICE", 0)
+                        else:
+                            station["PRICE"] = 0
+
+                    if station.get("UNI_ID"):
+                        return station
+                    _LOGGER.warning("detailById.do: no UNI_ID for %s, response: %s", uni_id, data)
                 else:
                     _LOGGER.warning("detailById.do failed for %s: HTTP %s", uni_id, resp.status)
     except Exception as e:
@@ -335,9 +376,16 @@ async def _fetch_station_coords(session, api_key: str, uid: str, vworld_key: str
 
 
 def _get_price(s: dict) -> int:
-    """detailById(OIL_PRICE) / aroundAll(PRICE) 호환 가격 추출"""
+    """detailById(OIL 배열) / aroundAll(PRICE) 호환 가격 추출"""
     try:
-        return int(s.get("PRICE") or s.get("OIL_PRICE") or 0)
+        p = s.get("PRICE") or s.get("OIL_PRICE")
+        if isinstance(p, list):
+            # detailById: PRICE가 OIL 배열로 들어온 경우 첫 번째 항목의 PRICE
+            for item in p:
+                if isinstance(item, dict):
+                    return int(item.get("PRICE", 0))
+            return 0
+        return int(p or 0)
     except (ValueError, TypeError):
         return 0
 
