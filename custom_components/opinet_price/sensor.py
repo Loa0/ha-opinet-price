@@ -226,7 +226,15 @@ def katec_to_wgs84(gis_x, gis_y):
 
 
 async def _fetch_detail_by_id(session, api_key: str, uni_id: str) -> dict | None:
-    """detailById.do → NEW_ADR(도로명주소) 반환"""
+    """detailById.do → (addr, name) 반환 (기존 호환용)"""
+    full = await _fetch_detail_by_id_full(session, api_key, uni_id)
+    if full:
+        return {"addr": full.get("NEW_ADR", ""), "name": full.get("OS_NM", "")}
+    return None
+
+
+async def _fetch_detail_by_id_full(session, api_key: str, uni_id: str) -> dict | None:
+    """detailById.do → 전체 주유소 데이터 반환 (aroundAll.do OIL 형식과 호환)"""
     url = f"{OPINET_DETAIL_URL}?code={api_key}&id={uni_id}&out=json"
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
     try:
@@ -238,10 +246,7 @@ async def _fetch_detail_by_id(session, api_key: str, uni_id: str) -> dict | None
                     result = data.get("RESULT", {}) or {}
                     oil = (result.get("OIL") or [None])[0] if isinstance(result, dict) else None
                     if isinstance(oil, dict):
-                        return {
-                            "addr": oil.get("NEW_ADR", ""),
-                            "name": oil.get("OS_NM", ""),
-                        }
+                        return oil
                     _LOGGER.warning("detailById.do: no OIL data for %s, response: %s", uni_id, data)
                 else:
                     _LOGGER.warning("detailById.do failed for %s: HTTP %s", uni_id, resp.status)
@@ -271,29 +276,35 @@ async def _fetch_search_by_name(session, api_key: str, osnm: str, area: str = ""
     return []
 
 
-async def _fetch_station_coords(session, api_key: str, uid: str, vworld_key: str, uni_id: str) -> tuple[dict | None, bool, bool]:
+async def _fetch_station_coords(session, api_key: str, uid: str, vworld_key: str, uni_id: str, known_addr: str = None) -> tuple[dict | None, bool, bool]:
     """UNI_ID → (result, detail_called, vworld_called).
-    GeoAPI /station/{uni_id}(Redis) 우선, MISS → detailById + /geocode"""
+    GeoAPI /station/{uni_id}(Redis) 우선, MISS → detailById + /geocode.
+    known_addr 제공 시 detailById 스킵하고 바로 /geocode 호출."""
     # 1. GeoAPI /station/{uni_id} → Redis 캐시 조회
-    station_url = f"{GEOCODE_URL}/station/{quote(uni_id, safe='')}"
-    try:
-        async with async_timeout.timeout(5):
-            async with session.get(station_url) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    if data.get("lat") is not None and data.get("lng") is not None:
-                        return (data, False, False)
-    except Exception as e:
-        _LOGGER.warning("Station cache lookup failed for %s: %s", uni_id, e)
+    if not known_addr:
+        station_url = f"{GEOCODE_URL}/station/{quote(uni_id, safe='')}"
+        try:
+            async with async_timeout.timeout(5):
+                async with session.get(station_url) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        if data.get("lat") is not None and data.get("lng") is not None:
+                            return (data, False, False)
+        except Exception as e:
+            _LOGGER.warning("Station cache lookup failed for %s: %s", uni_id, e)
 
-    # 2. MISS → detailById.do → 도로명주소
-    _LOGGER.warning("Station %s: cache MISS, calling detailById.do", uni_id)
-    detail = await _fetch_detail_by_id(session, api_key, uni_id)
-    if not detail or not detail["addr"]:
-        _LOGGER.warning("Station %s: detailById.do failed or no addr", uni_id)
-        return (None, True, False)
-
-    addr = detail["addr"]
+    # 2. MISS → detailById.do → 도로명주소 (known_addr 있으면 스킵)
+    detail_called = False
+    if known_addr:
+        addr = known_addr
+    else:
+        _LOGGER.warning("Station %s: cache MISS, calling detailById.do", uni_id)
+        detail = await _fetch_detail_by_id(session, api_key, uni_id)
+        if not detail or not detail["addr"]:
+            _LOGGER.warning("Station %s: detailById.do failed or no addr", uni_id)
+            return (None, True, False)
+        addr = detail["addr"]
+        detail_called = True
 
     # 3. GeoAPI /geocode → VWorld
     params = f"address={quote(addr)}&uid={quote(uid)}&uni_id={quote(uni_id, safe='')}"
@@ -308,7 +319,7 @@ async def _fetch_station_coords(session, api_key: str, uid: str, vworld_key: str
                     if data.get("status") == "ok":
                         result = {"addr": addr, "lat": float(data["lat"]), "lng": float(data["lng"])}
                         vworld_called = not data.get("cached", True)  # cached=false → 실제 VWorld 호출
-                        return (result, True, vworld_called)
+                        return (result, detail_called, vworld_called)
                     elif data.get("status") == "rate_limited":
                         _LOGGER.warning("GeoAPI rate limited for uid=%s", uid)
                 else:
@@ -316,7 +327,7 @@ async def _fetch_station_coords(session, api_key: str, uid: str, vworld_key: str
     except Exception as e:
         _LOGGER.debug("GeoAPI call failed for %s: %s", uni_id, e)
 
-    return (None, True, False)
+    return (None, detail_called, False)
 
 async def _fetch_tmap_distance(session, tmap_key, start_lat, start_lon, end_lat, end_lon):
     """Tmap API로 주행거리(m) 조회"""
@@ -477,16 +488,63 @@ class OpinetDataUpdateCoordinator(DataUpdateCoordinator):
                             len(stations),
                         )
                     
+                    # 3.5. 즐겨찾기 fallback: aroundAll.do에 없는 즐겨찾기 → detailById.do + GeoAPI
+                    favs = self.config_entry.options.get(CONF_FAVORITES, [])
+                    if favs:
+                        existing_ids = {s.get("UNI_ID") for s in stations}
+                        missing_favs = [f for f in favs if f not in existing_ids]
+                        if missing_favs:
+                            _LOGGER.debug("Fetching %d missing favorites via detailById.do", len(missing_favs))
+                            fav_tasks = [_fetch_detail_by_id_full(session, self.api_key, uid) for uid in missing_favs]
+                            fav_results = await asyncio.gather(*fav_tasks, return_exceptions=True)
+                            fav_stations = []
+                            fav_geo_addrs = []
+                            for i, r in enumerate(fav_results):
+                                if isinstance(r, dict) and r.get("UNI_ID"):
+                                    r["_IS_FAV_ONLY"] = True
+                                    fav_stations.append(r)
+                                    self.opinet_call_count += 1
+                                    # detailById로 얻은 주소로 GeoAPI 좌표 조회 (known_addr 전달)
+                                    addr = r.get("NEW_ADR") or r.get("VAN_ADR", "")
+                                    fav_geo_addrs.append(addr if addr else None)
+                                elif isinstance(r, Exception):
+                                    _LOGGER.debug("detailById.do error for fav %s: %s", missing_favs[i], r)
+                            # GeoAPI 좌표 조회: known_addr 제공 → detailById 중복 호출 방지
+                            if fav_stations:
+                                uid = self.config_entry.entry_id
+                                vw_key = self.vworld_key.strip() if self.vworld_key else ""
+                                fav_geo_tasks = [
+                                    _fetch_station_coords(session, self.api_key, uid, vw_key, s["UNI_ID"], known_addr=addr)
+                                    for s, addr in zip(fav_stations, fav_geo_addrs)
+                                ]
+                                fav_geo_results = await asyncio.gather(*fav_geo_tasks, return_exceptions=True)
+                                fav_vworld = 0
+                                for i, r in enumerate(fav_geo_results):
+                                    if isinstance(r, tuple) and len(r) == 3:
+                                        coords, _, vw_called = r
+                                        if vw_called:
+                                            fav_vworld += 1
+                                        if isinstance(coords, dict) and coords.get("lat") is not None:
+                                            fav_stations[i]["_GEO_LAT"] = coords["lat"]
+                                            fav_stations[i]["_GEO_LNG"] = coords["lng"]
+                                            fav_stations[i]["_GEO_ADDR"] = coords.get("addr", "")
+                                    elif isinstance(r, Exception):
+                                        _LOGGER.debug("Fav GeoAPI error for %s: %s", fav_stations[i].get("OS_NM"), r)
+                                self.vworld_call_count += fav_vworld
+                                stations.extend(fav_stations)
+                    
                     # 4. GeoAPI로 정확한 좌표 획득 (UNI_ID → Redis(/station/{uni_id}) → MISS → detailById → VWorld)
+                    # 단계 3.5에서 이미 좌표 획득한 fav 역은 스킵
                     if stations:
                         uid = self.config_entry.entry_id
                         vw_key = self.vworld_key.strip() if self.vworld_key else ""
-                        geo_tasks = [_fetch_station_coords(session, self.api_key, uid, vw_key, s.get("UNI_ID", "")) for s in stations]
-                        geo_results = await asyncio.gather(*geo_tasks, return_exceptions=True)
+                        geo_indices = [i for i, s in enumerate(stations) if "_GEO_LAT" not in s]
+                        geo_tasks = [(i, _fetch_station_coords(session, self.api_key, uid, vw_key, stations[i].get("UNI_ID", ""))) for i in geo_indices]
+                        geo_results = await asyncio.gather(*[t[1] for t in geo_tasks], return_exceptions=True)
                         detail_calls = 0
                         vworld_calls = 0
-                        for i, s in enumerate(stations):
-                            r = geo_results[i]
+                        for (i, _), r in zip(geo_tasks, geo_results):
+                            s = stations[i]
                             if isinstance(r, tuple) and len(r) == 3:
                                 coords, d_called, vw_called = r
                                 if d_called:
@@ -504,12 +562,15 @@ class OpinetDataUpdateCoordinator(DataUpdateCoordinator):
                         self.vworld_call_count += vworld_calls
 
                     # 5. Tmap 주행거리 + 주소 조회 (GeoAPI 좌표 우선, 없으면 KATEC)
+                    # 단, 즐겨찾기 전용(_IS_FAV_ONLY) 주유소는 Tmap 스킵
                     if self.tmap_key and stations:
                         _LOGGER.debug("Fetching Tmap driving distances for %d stations", len(stations))
                         dist_tasks = []
                         addr_tasks = []
                         addr_indices = []
                         for i, s in enumerate(stations):
+                            if s.get("_IS_FAV_ONLY"):
+                                continue  # fav 전용은 거리 계산 불필요
                             # GeoAPI 좌표 우선, 없으면 KATEC 변환
                             gis_x = s.get("GIS_X_COOR")
                             gis_y = s.get("GIS_Y_COOR")
@@ -600,13 +661,15 @@ class OpinetStationSensor(CoordinatorEntity, SensorEntity):
         if s:
             base = f"{s['OS_NM']}:\n{int(s['PRICE']):,}원"
             if self._show_distance:
-                # Tmap 주행거리 우선, 없으면 Opinet 직선거리
                 tmap_dist = s.get("_TMAP_DISTANCE")
                 if tmap_dist is not None:
                     base += f" ({float(tmap_dist)/1000:.1f}km)"
+                elif s.get("_IS_FAV_ONLY"):
+                    pass  # detailById 결과는 거리 정보 없음 → 표시 안 함
                 else:
                     dist = s.get("DISTANCE", 0)
-                    base += f" ({float(dist)/1000:.1f}km)"
+                    if dist:
+                        base += f" ({float(dist)/1000:.1f}km)"
             return base
         return "검색 결과 없음"
 
@@ -624,7 +687,12 @@ class OpinetStationSensor(CoordinatorEntity, SensorEntity):
                 short_addr = parts[1] if len(parts) > 1 and parts[1] else full_addr
             # 거리: Tmap 주행거리 우선
             tmap_dist = s.get("_TMAP_DISTANCE")
-            dist_str = f"{float(tmap_dist)/1000:.1f} km" if tmap_dist is not None else f"{float(s.get('DISTANCE', 0))/1000:.1f} km"
+            if tmap_dist is not None:
+                dist_str = f"{float(tmap_dist)/1000:.1f} km"
+            elif s.get("_IS_FAV_ONLY"):
+                dist_str = "권외"  # detailById 결과는 거리 정보 없음
+            else:
+                dist_str = f"{float(s.get('DISTANCE', 0))/1000:.1f} km"
             attrs = {
                 "주유소명": s["OS_NM"],
                 "가격": int(s["PRICE"]),

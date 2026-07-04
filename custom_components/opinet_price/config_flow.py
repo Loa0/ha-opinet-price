@@ -2,6 +2,7 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.core import callback
 from homeassistant.helpers import selector
+from homeassistant.helpers import entity_registry as er
 import homeassistant.helpers.config_validation as cv
 
 from .const import (
@@ -20,6 +21,7 @@ from .const import (
     CONF_REFRESH_DISTANCE,
     CONF_REFRESH_ENABLED,
     CONF_VWORLD_KEY,
+    FAV_LABELS,
     PROD_CODES,
     BRAND_CODES,
     HIGHWAY_OPTIONS,
@@ -68,7 +70,6 @@ class OpinetPriceOptionsFlowHandler(config_entries.OptionsFlow):
 
     async def async_step_api(self, user_input=None):
         if user_input is not None:
-            # 기존 옵션 유지
             user_input.update({k: v for k, v in self.config_entry.options.items()
                               if k not in user_input})
             return self.async_create_entry(title="", data=user_input)
@@ -110,12 +111,10 @@ class OpinetPriceOptionsFlowHandler(config_entries.OptionsFlow):
         if user_input is not None:
             search = user_input.get("search", "").strip()
             if search:
-                # 검색어 2글자 이상 검증
                 if len(search) < 2:
                     errors = {"search": "두 글자 이상 입력하세요"}
                     return await self._show_favorites_form(errors=errors)
                 area = user_input.get("search_area", "")
-                # searchByName.do 호출
                 session = async_get_clientsession(self.hass)
                 api_key = self.config_entry.options.get(CONF_API_KEY, self.config_entry.data.get(CONF_API_KEY, ""))
                 results = await _fetch_search_by_name(session, api_key, search, area)
@@ -124,7 +123,6 @@ class OpinetPriceOptionsFlowHandler(config_entries.OptionsFlow):
                     return await self._show_favorites_form(errors=errors)
                 self._search_results = results
                 return await self.async_step_favorites_select()
-            # 검색어 없으면 오류
             errors = {"search": "상호명을 입력하세요"}
             return await self._show_favorites_form(errors=errors)
 
@@ -142,23 +140,73 @@ class OpinetPriceOptionsFlowHandler(config_entries.OptionsFlow):
         if user_input is not None:
             new_favs = user_input.get(CONF_FAVORITES, [])
             existing = list(self.config_entry.options.get(CONF_FAVORITES, []))
+
+            # 감지: 삭제된 즐겨찾기
+            removed = set(existing) - set(new_favs)
+
+            # 병합: 기존 + 신규
+            merged = existing.copy()
             for uid in new_favs:
-                if uid not in existing:
-                    existing.append(uid)
+                if uid not in merged:
+                    merged.append(uid)
+
+            # fav_labels 업데이트: 검색 결과에서 라벨 저장, 삭제된 것 제거
+            labels = dict(self.config_entry.options.get(FAV_LABELS, {}))
+            for s in (getattr(self, "_search_results", []) or []):
+                uid = s.get("UNI_ID")
+                if uid:
+                    labels[uid] = {"name": s.get("OS_NM", "?"), "addr": s.get("NEW_ADR") or s.get("VAN_ADR", "")}
+            for uid in removed:
+                labels.pop(uid, None)
+
+            # 엔티티 정리: 삭제된 즐겨찾기의 센서/트래커 제거
+            if removed:
+                registry = er.async_get(self.hass)
+                eid = self.config_entry.entry_id
+                loc = self.config_entry.data.get(CONF_LOCATION_ENTITY) or "home"
+                for uni_id in removed:
+                    sensor_uid = f"opinet_price_{loc}_fav_{uni_id}"
+                    entity_id = registry.async_get_entity_id("sensor", DOMAIN, sensor_uid)
+                    if entity_id:
+                        registry.async_remove(entity_id)
+                    tracker_uid = f"opinet_price_tracker_{eid}_fav_{uni_id}"
+                    entity_id = registry.async_get_entity_id("device_tracker", DOMAIN, tracker_uid)
+                    if entity_id:
+                        registry.async_remove(entity_id)
+
             opts = dict(self.config_entry.options)
-            opts[CONF_FAVORITES] = existing
+            opts[CONF_FAVORITES] = merged
+            opts[FAV_LABELS] = labels
             return self.async_create_entry(title="", data=opts)
 
+        # fav_options 구성: 검색결과 + 기존 즐겨찾기(라벨 보존)
         fav_options = []
         results = getattr(self, "_search_results", []) or []
+        seen = set()
         for s in results:
             uid = s.get("UNI_ID")
-            name = s.get("OS_NM", "?")
-            addr = s.get("NEW_ADR") or s.get("VAN_ADR", "")
-            fav_options.append({"value": uid, "label": f"{name} ({addr})"})
+            if uid and uid not in seen:
+                name = s.get("OS_NM", "?")
+                addr = s.get("NEW_ADR") or s.get("VAN_ADR", "")
+                fav_options.append({"value": uid, "label": f"{name} ({addr})"})
+                seen.add(uid)
+
+        # 기존 즐겨찾기 중 검색결과에 없는 것들은 저장된 라벨로 추가
+        existing = self.config_entry.options.get(CONF_FAVORITES, [])
+        labels = self.config_entry.options.get(FAV_LABELS, {})
+        for uid in existing:
+            if uid and uid not in seen:
+                lbl = labels.get(uid, {})
+                name = lbl.get("name", uid)
+                addr = lbl.get("addr", "")
+                label = f"{name} ({addr})" if addr else name
+                fav_options.append({"value": uid, "label": label})
+                seen.add(uid)
+
+        default_favs = self.config_entry.options.get(CONF_FAVORITES, [])
 
         return self.async_show_form(step_id="favorites_select", data_schema=vol.Schema({
-            vol.Optional(CONF_FAVORITES, default=self.config_entry.options.get(CONF_FAVORITES, [])): selector.SelectSelector(
+            vol.Optional(CONF_FAVORITES, default=default_favs): selector.SelectSelector(
                 selector.SelectSelectorConfig(options=fav_options, multiple=True, mode=selector.SelectSelectorMode.DROPDOWN)),
         }))
 

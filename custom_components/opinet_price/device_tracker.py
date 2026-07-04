@@ -84,7 +84,12 @@ class OpinetDeviceTracker(CoordinatorEntity, TrackerEntity):
         if not s:
             return {}
         tmap_dist = s.get("_TMAP_DISTANCE")
-        dist_str = f"{float(tmap_dist) / 1000:.1f} km" if tmap_dist is not None else f"{float(s.get('DISTANCE', 0)) / 1000:.1f} km"
+        if tmap_dist is not None:
+            dist_str = f"{float(tmap_dist) / 1000:.1f} km"
+        elif s.get("_IS_FAV_ONLY"):
+            dist_str = "권외"
+        else:
+            dist_str = f"{float(s.get('DISTANCE', 0)) / 1000:.1f} km"
         attrs = {
             "상호명": s["OS_NM"],
             "가격": int(s["PRICE"]),
