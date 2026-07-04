@@ -65,7 +65,12 @@ class OpinetPriceOptionsFlowHandler(config_entries.OptionsFlow):
     async def async_step_init(self, user_input=None):
         return self.async_show_menu(
             step_id="init",
-            menu_options={"api": "API 키", "filters": "필터 설정", "favorites": "즐겨찾기 관리", "refresh": "갱신 설정"},
+            menu_options={
+                "api": "API 키",
+                "filters": "필터 설정",
+                "favorites": "즐겨찾기 관리",
+                "refresh": "갱신 설정",
+            },
         )
 
     async def async_step_api(self, user_input=None):
@@ -107,59 +112,109 @@ class OpinetPriceOptionsFlowHandler(config_entries.OptionsFlow):
                 selector.SelectSelectorConfig(options=SORT_OPTIONS, mode=selector.SelectSelectorMode.DROPDOWN)),
         }))
 
+    # ── 즐겨찾기 메뉴 ──────────────────────────────────────────────
+
     async def async_step_favorites(self, user_input=None):
+        """즐겨찾기 서브 메뉴: 추가 / 삭제"""
+        return self.async_show_menu(
+            step_id="favorites",
+            menu_options={
+                "fav_add": "즐겨찾기 추가",
+                "fav_delete": "즐겨찾기 삭제",
+            },
+        )
+
+    # ── 즐겨찾기 추가 ──────────────────────────────────────────────
+
+    async def async_step_fav_add(self, user_input=None):
         if user_input is not None:
             search = user_input.get("search", "").strip()
             if search:
                 if len(search) < 2:
                     errors = {"search": "두 글자 이상 입력하세요"}
-                    return await self._show_favorites_form(errors=errors)
+                    return await self._show_fav_add_form(errors=errors)
                 area = user_input.get("search_area", "")
                 session = async_get_clientsession(self.hass)
                 api_key = self.config_entry.options.get(CONF_API_KEY, self.config_entry.data.get(CONF_API_KEY, ""))
                 results = await _fetch_search_by_name(session, api_key, search, area)
                 if not results:
                     errors = {"search": "검색 결과가 없습니다"}
-                    return await self._show_favorites_form(errors=errors)
+                    return await self._show_fav_add_form(errors=errors)
                 self._search_results = results
-                return await self.async_step_favorites_select()
+                return await self.async_step_fav_add_select()
             errors = {"search": "상호명을 입력하세요"}
-            return await self._show_favorites_form(errors=errors)
+            return await self._show_fav_add_form(errors=errors)
+        return await self._show_fav_add_form()
 
-        return await self._show_favorites_form()
-
-    async def _show_favorites_form(self, errors=None):
+    async def _show_fav_add_form(self, errors=None):
         area_options = [{"value": code, "label": name} for name, code in AREA_CODES.items()]
-        return self.async_show_form(step_id="favorites", data_schema=vol.Schema({
+        return self.async_show_form(step_id="fav_add", data_schema=vol.Schema({
             vol.Optional("search", description="상호명 (2글자 이상)"): str,
             vol.Optional("search_area", default=""): selector.SelectSelector(
                 selector.SelectSelectorConfig(options=area_options, mode=selector.SelectSelectorMode.DROPDOWN)),
         }), errors=errors)
 
-    async def async_step_favorites_select(self, user_input=None):
+    async def async_step_fav_add_select(self, user_input=None):
         if user_input is not None:
             new_favs = user_input.get(CONF_FAVORITES, [])
             existing = list(self.config_entry.options.get(CONF_FAVORITES, []))
-
-            # 감지: 삭제된 즐겨찾기
-            removed = set(existing) - set(new_favs)
-
-            # 병합: 기존 + 신규
             merged = existing.copy()
             for uid in new_favs:
                 if uid not in merged:
                     merged.append(uid)
 
-            # fav_labels 업데이트: 검색 결과에서 라벨 저장, 삭제된 것 제거
             labels = dict(self.config_entry.options.get(FAV_LABELS, {}))
             for s in (getattr(self, "_search_results", []) or []):
                 uid = s.get("UNI_ID")
                 if uid:
                     labels[uid] = {"name": s.get("OS_NM", "?"), "addr": s.get("NEW_ADR") or s.get("VAN_ADR", "")}
+
+            opts = dict(self.config_entry.options)
+            opts[CONF_FAVORITES] = merged
+            opts[FAV_LABELS] = labels
+            return self.async_create_entry(title="", data=opts)
+
+        fav_options = []
+        results = getattr(self, "_search_results", []) or []
+        seen = set()
+        for s in results:
+            uid = s.get("UNI_ID")
+            if uid and uid not in seen:
+                name = s.get("OS_NM", "?")
+                addr = s.get("NEW_ADR") or s.get("VAN_ADR", "")
+                fav_options.append({"value": uid, "label": f"{name} ({addr})"})
+                seen.add(uid)
+
+        existing = self.config_entry.options.get(CONF_FAVORITES, [])
+        labels = self.config_entry.options.get(FAV_LABELS, {})
+        for uid in existing:
+            if uid and uid not in seen:
+                lbl = labels.get(uid, {})
+                name = lbl.get("name", uid)
+                addr = lbl.get("addr", "")
+                label = f"{name} ({addr})" if addr else name
+                fav_options.append({"value": uid, "label": label})
+                seen.add(uid)
+
+        default_favs = self.config_entry.options.get(CONF_FAVORITES, [])
+        return self.async_show_form(step_id="fav_add_select", data_schema=vol.Schema({
+            vol.Optional(CONF_FAVORITES, default=default_favs): selector.SelectSelector(
+                selector.SelectSelectorConfig(options=fav_options, multiple=True, mode=selector.SelectSelectorMode.DROPDOWN)),
+        }))
+
+    # ── 즐겨찾기 삭제 ──────────────────────────────────────────────
+
+    async def async_step_fav_delete(self, user_input=None):
+        if user_input is not None:
+            keep = user_input.get("fav_keep", [])
+            existing = list(self.config_entry.options.get(CONF_FAVORITES, []))
+            removed = set(existing) - set(keep)
+
+            labels = dict(self.config_entry.options.get(FAV_LABELS, {}))
             for uid in removed:
                 labels.pop(uid, None)
 
-            # 엔티티 정리: 삭제된 즐겨찾기의 센서/트래커 제거
+            # 엔티티 정리
             if removed:
                 registry = er.async_get(self.hass)
                 eid = self.config_entry.entry_id
@@ -175,40 +230,26 @@ class OpinetPriceOptionsFlowHandler(config_entries.OptionsFlow):
                         registry.async_remove(entity_id)
 
             opts = dict(self.config_entry.options)
-            opts[CONF_FAVORITES] = merged
+            opts[CONF_FAVORITES] = keep
             opts[FAV_LABELS] = labels
             return self.async_create_entry(title="", data=opts)
 
-        # fav_options 구성: 검색결과 + 기존 즐겨찾기(라벨 보존)
-        fav_options = []
-        results = getattr(self, "_search_results", []) or []
-        seen = set()
-        for s in results:
-            uid = s.get("UNI_ID")
-            if uid and uid not in seen:
-                name = s.get("OS_NM", "?")
-                addr = s.get("NEW_ADR") or s.get("VAN_ADR", "")
-                fav_options.append({"value": uid, "label": f"{name} ({addr})"})
-                seen.add(uid)
-
-        # 기존 즐겨찾기 중 검색결과에 없는 것들은 저장된 라벨로 추가
         existing = self.config_entry.options.get(CONF_FAVORITES, [])
         labels = self.config_entry.options.get(FAV_LABELS, {})
+        fav_options = []
         for uid in existing:
-            if uid and uid not in seen:
-                lbl = labels.get(uid, {})
-                name = lbl.get("name", uid)
-                addr = lbl.get("addr", "")
-                label = f"{name} ({addr})" if addr else name
-                fav_options.append({"value": uid, "label": label})
-                seen.add(uid)
+            lbl = labels.get(uid, {})
+            name = lbl.get("name", uid)
+            addr = lbl.get("addr", "")
+            label = f"{name} ({addr})" if addr else name
+            fav_options.append({"value": uid, "label": label})
 
-        default_favs = self.config_entry.options.get(CONF_FAVORITES, [])
-
-        return self.async_show_form(step_id="favorites_select", data_schema=vol.Schema({
-            vol.Optional(CONF_FAVORITES, default=default_favs): selector.SelectSelector(
+        return self.async_show_form(step_id="fav_delete", data_schema=vol.Schema({
+            vol.Optional("fav_keep", default=existing): selector.SelectSelector(
                 selector.SelectSelectorConfig(options=fav_options, multiple=True, mode=selector.SelectSelectorMode.DROPDOWN)),
         }))
+
+    # ── 갱신 설정 ──────────────────────────────────────────────────
 
     async def async_step_refresh(self, user_input=None):
         if user_input is not None:
