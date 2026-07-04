@@ -89,10 +89,19 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     try:
         # sensor 먼저 로드 → coordinator 생성 후 button/device_tracker 로드
-        await hass.config_entries.async_forward_entry_setups(entry, ["sensor"])
-        await hass.config_entries.async_forward_entry_setups(entry, ["button", "device_tracker"])
+        try:
+            await hass.config_entries.async_forward_entry_setups(entry, ["sensor"])
+        except ConfigEntryNotReady:
+            raise  # 그대로 전파
+        except Exception as e:
+            _LOGGER.error("Sensor setup failed: %s", e, exc_info=True)
+            raise ConfigEntryNotReady(f"Sensor setup failed: {e}")
 
-        coordinator = hass.data[DOMAIN][entry.entry_id]
+        coordinator = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+        if coordinator is None:
+            raise ConfigEntryNotReady("Sensor coordinator not initialized")
+
+        await hass.config_entries.async_forward_entry_setups(entry, ["button", "device_tracker"])
 
         # ponytail: init last_refresh_location from current state
         coordinator.last_refresh_location = _get_current_location(hass, entry)

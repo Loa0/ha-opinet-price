@@ -570,7 +570,8 @@ class OpinetDataUpdateCoordinator(DataUpdateCoordinator):
                         addr_indices = []
                         for i, s in enumerate(stations):
                             if s.get("_IS_FAV_ONLY"):
-                                continue  # fav 전용은 거리 계산 불필요
+                                dist_tasks.append(None)  # placeholder 유지 (인덱스 동기화)
+                                continue
                             # GeoAPI 좌표 우선, 없으면 KATEC 변환
                             gis_x = s.get("GIS_X_COOR")
                             gis_y = s.get("GIS_Y_COOR")
