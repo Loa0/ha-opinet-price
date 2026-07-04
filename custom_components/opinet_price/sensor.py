@@ -25,6 +25,7 @@ from .const import (
     CONF_SORT_ORDER,
     CONF_FAVORITES,
     CONF_VWORLD_KEY,
+    FAV_LABELS,
     PROD_CODES,
 )
 
@@ -103,8 +104,11 @@ async def async_setup_entry(hass, entry, async_add_entities):
     
     # 즐겨찾기 센서
     favorites = entry.options.get(CONF_FAVORITES, [])
+    fav_labels = entry.options.get(FAV_LABELS, {})
     for i, uni_id in enumerate(favorites):
-        sensors.append(OpinetStationSensor(coordinator, entry, i, location_entity, show_distance, uni_id=uni_id))
+        lbl = fav_labels.get(uni_id, {})
+        fav_label = lbl.get("name", "") or ""
+        sensors.append(OpinetStationSensor(coordinator, entry, i, location_entity, show_distance, uni_id=uni_id, fav_label=fav_label))
     
     async_add_entities(sensors)
     
@@ -615,12 +619,13 @@ class OpinetDataUpdateCoordinator(DataUpdateCoordinator):
             raise UpdateFailed(f"Error communicating with API: {e}")
 
 class OpinetStationSensor(CoordinatorEntity, SensorEntity):
-    def __init__(self, coordinator, entry, index, location_entity, show_distance=True, uni_id=None):
+    def __init__(self, coordinator, entry, index, location_entity, show_distance=True, uni_id=None, fav_label=""):
         super().__init__(coordinator)
         self._index = index
         self._uni_id = uni_id
         self._location_entity = location_entity
         self._show_distance = show_distance
+        self._fav_label = fav_label
         if uni_id:
             self._attr_unique_id = f"opinet_price_{self._location_entity or 'home'}_fav_{uni_id}"
         else:
@@ -635,8 +640,11 @@ class OpinetStationSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def name(self):
+        if self._uni_id and self._fav_label:
+            return self._fav_label
         if self._uni_id:
-            return f"즐겨찾기 {self._index + 1}"
+            s = self._get_station()
+            return s["OS_NM"] if s else "즐겨찾기"
         return f"{self._index + 1}위"
 
     def _get_station(self):
