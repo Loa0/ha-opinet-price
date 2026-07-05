@@ -760,6 +760,8 @@ class OpinetStationSensor(CoordinatorEntity, SensorEntity):
                 "간략주소": short_addr,
                 "브랜드": s.get("POLL_DIV_CD", ""),
                 "거리": dist_str,
+                "위도": s.get("_GEO_LAT", ""),
+                "경도": s.get("_GEO_LNG", ""),
             }
             if not self._uni_id:
                 attrs["순위"] = self._index + 1
