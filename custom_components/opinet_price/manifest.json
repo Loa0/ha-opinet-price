@@ -1,10 +1,11 @@
 {
   "domain": "opinet_price",
   "name": "오피넷 주유소 최저가",
-  "documentation": "https://www.opinet.co.kr",
-  "dependencies": [],
   "codeowners": [],
-  "version": "1.10.13",
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://www.opinet.co.kr",
   "iot_class": "cloud_polling",
-  "config_flow": true
+  "issue_tracker": "https://github.com/Loa0/ha-opinet-price/issues",
+  "version": "1.10.13"
 }
