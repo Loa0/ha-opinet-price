@@ -681,9 +681,9 @@ class OpinetStationSensor(CoordinatorEntity, SensorEntity):
         self._show_distance = show_distance
         self._fav_label = fav_label
         if uni_id:
-            self._attr_unique_id = f"opinet_price_{self._location_entity or 'home'}_fav_{uni_id}"
+            self._attr_unique_id = f"opinet_price_{entry.entry_id}_fav_{uni_id}"
         else:
-            self._attr_unique_id = f"opinet_price_{self._location_entity or 'home'}_{index + 1}"
+            self._attr_unique_id = f"opinet_price_{entry.entry_id}_{index + 1}"
         self._attr_icon = "mdi:gas-station"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry.entry_id)},
