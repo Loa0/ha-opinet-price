@@ -28,7 +28,7 @@ from .const import (
     SORT_OPTIONS,
     AREA_CODES,
 )
-from .sensor import _fetch_search_by_name
+from .api_client import _fetch_search_by_name
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 class OpinetPriceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):

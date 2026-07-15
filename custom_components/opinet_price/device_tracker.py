@@ -7,7 +7,7 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, CONF_FAVORITES
-from .sensor import katec_to_wgs84, _get_price
+from ._coord_util import katec_to_wgs84, _get_price
 
 _LOGGER = logging.getLogger(__name__)
 
