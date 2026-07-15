@@ -25,13 +25,25 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
     # 즐겨찾기
     favorites = entry.options.get(CONF_FAVORITES, [])
+    fav_data = getattr(coordinator, 'fav_data', [])
     for fav_id in favorites:
+        found = None
         for s in stations:
             if s.get("UNI_ID") == fav_id:
-                lat, lon = katec_to_wgs84(s.get("GIS_X_COOR"), s.get("GIS_Y_COOR"))
-                if lat is not None and lon is not None:
-                    entities.append(OpinetDeviceTracker(coordinator, entry, 0, lat, lon, uni_id=fav_id))
+                found = s
                 break
+        if not found:
+            for s in fav_data:
+                if s.get("UNI_ID") == fav_id:
+                    found = s
+                    break
+        if found:
+            lat, lon = katec_to_wgs84(found.get("GIS_X_COOR"), found.get("GIS_Y_COOR"))
+            if lat is None or lon is None:
+                lat = found.get("_GEO_LAT")
+                lon = found.get("_GEO_LNG")
+            if lat is not None and lon is not None:
+                entities.append(OpinetDeviceTracker(coordinator, entry, 0, lat, lon, uni_id=fav_id))
 
     _LOGGER.debug("Added %d device_tracker entities", len(entities))
     async_add_entities(entities)
@@ -57,11 +69,15 @@ class OpinetDeviceTracker(CoordinatorEntity, TrackerEntity):
         )
 
     def _get_station(self):
-        stations = self.coordinator.data
-        if not stations:
+        stations = self.coordinator.data or []
+        fav_stations = getattr(self.coordinator, 'fav_data', [])
+        if not stations and not fav_stations:
             return None
         if self._uni_id:
             for s in stations:
+                if s.get("UNI_ID") == self._uni_id:
+                    return s
+            for s in fav_stations:
                 if s.get("UNI_ID") == self._uni_id:
                     return s
             return None
