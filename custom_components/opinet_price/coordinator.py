@@ -371,7 +371,7 @@ class OpinetDataUpdateCoordinator(DataUpdateCoordinator):
 
     def _sort_stations(self, stations):
         if self.sort_order == "주행거리순":
-            stations.sort(key=lambda x: float(x.get("_TMAP_DISTANCE", 1e9)))
+            stations.sort(key=lambda x: float(x.get("_TMAP_DISTANCE") or 1e9))
         elif stations:
-            stations.sort(key=lambda x: (_get_price(x), float(x.get("_TMAP_DISTANCE", 1e9))))
+            stations.sort(key=lambda x: (_get_price(x), float(x.get("_TMAP_DISTANCE") or 1e9)))
         return stations
