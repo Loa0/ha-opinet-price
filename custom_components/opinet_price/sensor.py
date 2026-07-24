@@ -8,7 +8,8 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, CONF_API_KEY, CONF_RADIUS, CONF_PRODCD, CONF_LOCATION_ENTITY, \
     CONF_POLL_DIV, CONF_SELF_ONLY, CONF_HIGHWAY_FILTER, CONF_MAX_DISTANCE, \
-    CONF_TMAP_KEY, CONF_SORT_ORDER, CONF_FAVORITES, FAV_LABELS, CONF_VWORLD_KEY
+    CONF_TMAP_KEY, CONF_SORT_ORDER, CONF_FAVORITES, FAV_LABELS, CONF_VWORLD_KEY, \
+    CONF_RANK_COUNT
 from .coordinator import OpinetDataUpdateCoordinator
 from ._coord_util import _get_price
 
@@ -45,6 +46,9 @@ async def async_setup_entry(hass, entry, async_add_entities):
     tmap_key = entry.options.get(CONF_TMAP_KEY, entry.data.get(CONF_TMAP_KEY, ""))
     sort_order = entry.options.get(CONF_SORT_ORDER, entry.data.get(CONF_SORT_ORDER, "가격순"))
     vworld_key = entry.options.get(CONF_VWORLD_KEY, entry.data.get(CONF_VWORLD_KEY, ""))
+    rank_count = entry.options.get(CONF_RANK_COUNT, 10)
+    if not isinstance(rank_count, int):
+        rank_count = int(rank_count)
 
     _LOGGER.debug(
         "Setting up Opinet Price entry. options: %s, data: %s, poll_div: %s, "
@@ -55,11 +59,12 @@ async def async_setup_entry(hass, entry, async_add_entities):
     coordinator = OpinetDataUpdateCoordinator(
         hass, entry, api_key, radius, prodcd, location_entity,
         poll_div, self_only, highway_filter, tmap_key, sort_order, vworld_key,
+        rank_count=rank_count,
     )
     await coordinator.async_config_entry_first_refresh()
 
     sensors = []
-    for i in range(10):
+    for i in range(rank_count):
         sensors.append(OpinetStationSensor(coordinator, entry, i, location_entity, show_distance))
 
     favorites = entry.options.get(CONF_FAVORITES, [])

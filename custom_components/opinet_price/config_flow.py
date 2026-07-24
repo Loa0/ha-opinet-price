@@ -21,6 +21,7 @@ from .const import (
     CONF_REFRESH_DISTANCE,
     CONF_REFRESH_ENABLED,
     CONF_VWORLD_KEY,
+    CONF_RANK_COUNT,
     FAV_LABELS,
     PROD_CODES,
     BRAND_CODES,
@@ -100,6 +101,8 @@ class OpinetPriceOptionsFlowHandler(config_entries.OptionsFlow):
         default_brands = [b.strip() for b in current_value.split(",") if b.strip()] if isinstance(current_value, str) and current_value else (current_value if isinstance(current_value, list) else [])
 
         return self.async_show_form(step_id="filters", data_schema=vol.Schema({
+            vol.Optional(CONF_RANK_COUNT, default=opts.get(CONF_RANK_COUNT, 10)): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=1, max=20, step=1, unit_of_measurement="개", mode=selector.NumberSelectorMode.BOX)),
             vol.Optional(CONF_RADIUS, default=opts.get(CONF_RADIUS, dat.get(CONF_RADIUS, 5.0))): selector.NumberSelector(
                 selector.NumberSelectorConfig(min=0.5, max=20, step=0.1, unit_of_measurement="km", mode=selector.NumberSelectorMode.SLIDER)),
             vol.Optional(CONF_POLL_DIV, default=default_brands): selector.SelectSelector(

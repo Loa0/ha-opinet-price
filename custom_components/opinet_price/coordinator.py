@@ -118,6 +118,7 @@ class OpinetDataUpdateCoordinator(DataUpdateCoordinator):
         self, hass, entry, api_key, radius, prodcd, location_entity,
         poll_div=None, self_only=False, highway_filter="전체",
         tmap_key="", sort_order="가격순", vworld_key="",
+        rank_count=10,
     ):
         super().__init__(hass, _LOGGER, name=DOMAIN)
         self.config_entry = entry
@@ -131,6 +132,7 @@ class OpinetDataUpdateCoordinator(DataUpdateCoordinator):
         self.tmap_key = tmap_key
         self.sort_order = sort_order
         self.vworld_key = vworld_key
+        self.rank_count = rank_count
         self.opinet_call_count = 0
         self.vworld_call_count = 0
         self.tmap_call_count = 0
@@ -196,6 +198,8 @@ class OpinetDataUpdateCoordinator(DataUpdateCoordinator):
                     stations = self._apply_highway_filter(stations)
                     # 3.5. 즐겨찾기 fallback
                     stations = await self._fetch_favorites_fallback(session, stations)
+                    # 3.6. 랭킹 수 제한 (Tmap API 절약)
+                    stations = self._apply_rank_limit(stations)
                     # 4. GeoAPI 좌표 획득
                     stations = await self._fetch_geo_coords(session, stations)
                     # 5. Tmap 거리/주소
@@ -238,6 +242,15 @@ class OpinetDataUpdateCoordinator(DataUpdateCoordinator):
                 if not (s.get("POLL_DIV_CD") == "RTX" or "휴게소" in s.get("OS_NM", ""))
             ]
         return stations
+
+    def _apply_rank_limit(self, stations):
+        """랭킹 상위 N개만 유지 (Tmap API 호출 수 절약)"""
+        if not stations:
+            return stations
+        if len(stations) <= self.rank_count:
+            return stations
+        # favorites는 따로 보관되므로 메인 랭킹에서만 제한
+        return stations[:self.rank_count]
 
     async def _fetch_favorites_fallback(self, session, stations):
         favs = self.config_entry.options.get(CONF_FAVORITES, [])
