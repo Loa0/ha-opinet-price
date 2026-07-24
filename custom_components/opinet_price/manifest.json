@@ -7,5 +7,5 @@
   "documentation": "https://www.opinet.co.kr",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/Loa0/ha-opinet-price/issues",
-  "version": "1.10.19"
+  "version": "1.11.0"
 }
